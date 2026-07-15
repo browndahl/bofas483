@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import objectives from '../data/objectives.json';
-import { BUILDINGS, buildingCapacity, buildingDisplayName, canAffordUpgrade } from '../simulation/building';
+import { BUILDINGS, buildingCapacity, buildingDisplayName, canAffordUpgrade, upgradeCost, upgradeDescription } from '../simulation/building';
 import { ACTIVITY_LABELS, ROLE_LABELS, SKILL_KEYS, SKILL_LABELS, skillLevel } from '../simulation/colonyLife';
 import { personalityLabels } from '../simulation/personality';
+import { relationshipStage } from '../simulation/livingWorld';
 import type { BuildingState, CreatureState, WorldState } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
 import { saveService } from '../services/saveService';
@@ -42,6 +43,7 @@ export class UIScene extends Phaser.Scene {
   private buildingActivity!: Phaser.GameObjects.Text;
   private buildingUpgradeCost!: Phaser.GameObjects.Text;
   private upgradeButton!: Phaser.GameObjects.Container;
+  private capacityUpgradeButton!: Phaser.GameObjects.Container;
   private toast?: Phaser.GameObjects.Text;
   private lastChapter = 1;
   private observedDeaths = 0;
@@ -98,15 +100,17 @@ export class UIScene extends Phaser.Scene {
     });
 
     this.buildingPanel = this.add.container(0, 0).setDepth(111).setVisible(false);
-    this.buildingPanel.add(panel(this, 0, 0, 340, 330));
+    this.buildingPanel.add(panel(this, 0, 0, 360, 360));
     this.buildingName = crisp(this.add.text(-145, -140, '', { fontFamily: DISPLAY_FONT, fontSize: '16px', color: '#fff0a8', letterSpacing: 0.7 }));
     this.buildingLevel = crisp(this.add.text(145, -138, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#7af6bd' })).setOrigin(1, 0);
     this.buildingDetails = crisp(this.add.text(-145, -106, '', { fontFamily: UI_FONT, fontSize: '11px', color: '#dff5ea', lineSpacing: 5, wordWrap: { width: 290 } }));
     this.buildingActivity = crisp(this.add.text(-145, 20, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#90c9b0', lineSpacing: 5 }));
-    this.buildingUpgradeCost = crisp(this.add.text(0, 83, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#f7bd62', align: 'center', wordWrap: { width: 280 } })).setOrigin(0.5);
-    this.upgradeButton = button(this, 0, 126, 260, 42, 'UPGRADE FACILITY', 0x7af6bd);
-    this.upgradeButton.on('pointerup', () => this.upgradeSelectedBuilding());
-    this.buildingPanel.add([this.buildingName, this.buildingLevel, this.buildingDetails, this.buildingActivity, this.buildingUpgradeCost, this.upgradeButton]);
+    this.buildingUpgradeCost = crisp(this.add.text(0, 77, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#f7bd62', align: 'center', wordWrap: { width: 320 }, lineSpacing: 3 })).setOrigin(0.5);
+    this.upgradeButton = button(this, -86, 139, 156, 42, 'QUALITY PATH', 0x7af6bd);
+    this.capacityUpgradeButton = button(this, 86, 139, 156, 42, 'CAPACITY PATH', 0x65c7ff);
+    this.upgradeButton.on('pointerup', () => this.upgradeSelectedBuilding('quality'));
+    this.capacityUpgradeButton.on('pointerup', () => this.upgradeSelectedBuilding('capacity'));
+    this.buildingPanel.add([this.buildingName, this.buildingLevel, this.buildingDetails, this.buildingActivity, this.buildingUpgradeCost, this.upgradeButton, this.capacityUpgradeButton]);
     this.buildButton = button(this, 0, 0, 148, 46, 'BUILD  +', 0x7af6bd).setDepth(120);
     this.buildButton.on('pointerup', () => this.toggleBuildMenu());
     const profileButton = button(this, 0, 0, 124, 38, 'AUDIT ↗', 0xbf78ff).setDepth(120).setName('profile-button');
@@ -120,13 +124,17 @@ export class UIScene extends Phaser.Scene {
     authButton.on('pointerup', () => this.scene.launch('AuthScene'));
     const guideButton = button(this, 0, 0, 104, 38, 'GUIDE  ?', 0xff8fcf).setDepth(120).setName('guide-button');
     guideButton.on('pointerup', () => this.scene.launch('GuideScene'));
+    const colonyButton = button(this, 0, 0, 114, 38, 'COLONY ◈', 0x7af6bd).setDepth(120).setName('colony-button');
+    colonyButton.on('pointerup', () => this.scene.launch('ColonyScene'));
+    const speedButton = button(this, 0, 0, 110, 34, 'RUN 1×', 0x65c7ff).setDepth(120).setName('speed-button');
+    speedButton.on('pointerup', () => gameStore.cycleSpeed());
   }
   private layout = () => {
     const { width, height } = this.scale; const portrait = width < 650;
     this.topPanel.setSize(width, 58);
     this.topAccent.setSize(width, 2);
     this.resourcesText.setPosition(width - 18, 14); this.populationText.setPosition(width - 18, 35);
-    this.objectiveText.setPosition(portrait ? 12 : width / 2, 68).setOrigin(portrait ? 0 : 0.5, 0);
+    this.objectiveText.setPosition(portrait ? 12 : width / 2, portrait ? 212 : 68).setOrigin(portrait ? 0 : 0.5, 0);
     this.creaturePanel.setPosition(portrait ? width / 2 : 178, portrait ? height - 214 : height - 226).setScale(portrait ? 0.72 : 1);
     this.buildingPanel.setPosition(portrait ? width / 2 : 182, portrait ? height - 190 : height - 182).setScale(portrait ? 0.78 : 1);
     this.buildButton.setPosition(portrait ? width - 84 : width - 92, height - 40);
@@ -134,6 +142,8 @@ export class UIScene extends Phaser.Scene {
     (this.children.getByName('save-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? 174 : width - 356, height - 40);
     (this.children.getByName('auth-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? this.scale.width - 58 : width - 468, portrait ? 92 : height - 40);
     (this.children.getByName('guide-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? this.scale.width - 64 : width - 582, portrait ? 140 : height - 40);
+    (this.children.getByName('colony-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? 64 : width - 704, portrait ? 92 : height - 40);
+    (this.children.getByName('speed-button') as Phaser.GameObjects.Container | null)?.setPosition(width - 70, portrait ? 184 : 88);
     if (this.buildMenu) { this.buildMenu.setPosition(width / 2, height / 2); }
   };
   private updateState(state: WorldState) {
@@ -144,9 +154,13 @@ export class UIScene extends Phaser.Scene {
     }
     this.observedTime = state.time;
     this.state = state;
+    this.topPanel.setFillStyle(state.livingWorld.settings.highContrast ? 0x07100d : 0x2c281c, state.livingWorld.settings.highContrast ? 1 : 0.92);
     const living = state.creatures.filter((c) => c.alive);
     this.resourcesText.setText(`GLOW ${Math.floor(state.resources.glow)}   ·   ALLOY ${Math.floor(state.resources.alloy)}`);
     this.populationText.setText(`LIVING ${living.length}  /  SILENT ${state.deaths}  /  ${Math.floor(state.time)}s`);
+    const activeAlerts = state.livingWorld.alerts.filter((alert) => !alert.dismissed).length;
+    const speedButton = this.children.getByName('speed-button') as Phaser.GameObjects.Container | null;
+    (speedButton?.getByName('button-label') as Phaser.GameObjects.Text | null)?.setText(`${state.livingWorld.settings.paused ? 'PAUSED' : `RUN ${state.livingWorld.settings.simulationSpeed}×`}${activeAlerts ? `  !${activeAlerts}` : ''}`);
     const chapterNames = ['TENDER SIGNAL', 'THE CHORUS', 'THROUGHPUT', 'THE AUDIT', 'VERDICT'];
     this.chapterText.setText(`CHAPTER 0${state.chapter} / ${chapterNames[state.chapter - 1]}`);
     this.selected = state.creatures.find((c) => c.id === this.selected?.id) ?? living[0] ?? state.creatures[0];
@@ -176,11 +190,11 @@ export class UIScene extends Phaser.Scene {
     if (state.chapter === 4 && state.time > 330 && !state.endingId) this.openDialogue('ending');
   }
   private renderCreature(creature: CreatureState) {
-    this.creatureName.setText(creature.name); this.creatureStatus.setText(creature.alive ? `${creature.task.toUpperCase()} · GEN ${creature.generation}` : 'SILENT').setColor(creature.alive ? '#678779' : '#ff735f');
-    this.creatureRole.setText(`${ROLE_LABELS[creature.role]}  ·  ROLE`);
+    this.creatureName.setText(creature.name); this.creatureStatus.setText(creature.alive ? `${creature.task.toUpperCase()} · GEN ${creature.generation}` : 'SILENT').setColor(creature.alive ? '#90c9b0' : '#ff735f');
+    this.creatureRole.setText(`${ROLE_LABELS[creature.assignedRole]}  ·  ${creature.autoRole ? 'SELF-DIRECTED' : 'ASSIGNED'}  ·  STRESS ${Math.round(creature.stress)}%`);
     const strongestBond = Object.entries(creature.bonds).sort((a, b) => b[1] - a[1])[0];
     const bondName = strongestBond ? this.state.creatures.find((candidate) => candidate.id === strongestBond[0])?.name : undefined;
-    this.creaturePersonality.setText(`${personalityLabels(creature.personality).join(' · ')}${bondName ? `  /  CLOSE TO ${bondName} ${Math.round(strongestBond[1])}%` : ''}`);
+    this.creaturePersonality.setText(`${personalityLabels(creature.personality).join(' · ')}${bondName ? `  /  ${relationshipStage(strongestBond[1])} ${bondName} ${Math.round(strongestBond[1])}%` : ''}\nCONCERN  ${creature.currentConcern}`);
     this.creaturePreference.setText(`LOVES ${ACTIVITY_LABELS[creature.preferences.favoriteActivity]}  ·  ${BUILDINGS[creature.preferences.favoriteBuilding].name.toUpperCase()}`);
     this.creatureAmbition.setText(`AMBITION  ${creature.ambition.description.toUpperCase()}  ·  ${Math.min(100, Math.round(creature.ambition.progress / creature.ambition.target * 100))}%`);
     const skillRows = [0, 2, 4].map((index) => {
@@ -189,7 +203,13 @@ export class UIScene extends Phaser.Scene {
     });
     this.creatureSkills.setText(`SKILLS / PRACTICE\n${skillRows.join('\n')}`);
     Object.entries(creature.needs).forEach(([key, value]) => {
-      const view = this.meters.get(key); if (view) view.target = view.width * value / 100;
+      const view = this.meters.get(key); if (view) {
+        view.target = view.width * value / 100;
+        const colors = this.state.livingWorld.settings.colorBlind
+          ? { hunger: 0xffc857, hygiene: 0x2ec4e6, happiness: 0xf45bba, health: 0x8cff98, energy: 0xf4f1de }
+          : { hunger: 0xf7bd62, hygiene: 0x65c7ff, happiness: 0xbf78ff, health: 0x7af6bd, energy: 0xff8fcf };
+        view.fill.setFillStyle((colors as Record<string, number>)[key]);
+      }
     });
     this.careButtons.forEach((control) => control.setAlpha(creature.alive ? 1 : 0.3));
   }
@@ -200,16 +220,19 @@ export class UIScene extends Phaser.Scene {
     const queued = Math.max(0, occupants.length - active);
     this.buildingName.setText(`${def.glyph}  ${buildingDisplayName(building).toUpperCase()}`);
     this.buildingLevel.setText(`LEVEL ${building.level} / 2`);
-    this.buildingDetails.setText(`${def.description}\n\nCURRENT EFFECT\n${building.level >= 2 ? def.upgrade.effect : def.effect}\n\n${building.level >= 2 ? def.upgrade.description : 'Select this facility at any time to inspect activity and upgrades.'}`);
-    this.buildingActivity.setText(`SERVICE STATIONS  ${active} / ${buildingCapacity(building)}\nWAITING IN QUEUE  ${queued}\nFACILITY STATUS  ${building.active ? 'ACTIVE' : 'OFFLINE'}`);
+    this.buildingDetails.setText(`${def.description}\n\nCURRENT EFFECT\n${building.level >= 2 ? upgradeDescription(building, building.upgradeBranch ?? 'quality') : def.effect}\n\nINFLUENCE ${building.influenceRadius}m  ·  DURABILITY ${Math.round(building.durability)}%`);
+    this.buildingActivity.setText(`SERVICE STATIONS  ${active} / ${buildingCapacity(building)}\nWAITING IN QUEUE  ${queued}\nFACILITY STATUS  ${building.constructing ? `CONSTRUCTION ${Math.floor(building.constructionProgress)}%` : building.active ? 'ACTIVE' : 'OFFLINE'}`);
     if (building.level >= 2) {
       this.buildingUpgradeCost.setText('MAXIMUM UPGRADE INSTALLED');
       this.upgradeButton.setAlpha(0.35).disableInteractive();
+      this.capacityUpgradeButton.setAlpha(0.35).disableInteractive();
     } else {
-      const cost = def.upgrade.cost; const affordable = canAffordUpgrade(this.state.resources, building);
-      this.buildingUpgradeCost.setText(`${def.upgrade.name.toUpperCase()}  ·  ${cost.glow} GLOW / ${cost.alloy} ALLOY`);
-      this.upgradeButton.setAlpha(affordable ? 1 : 0.48);
-      if (affordable) this.upgradeButton.setInteractive({ useHandCursor: true }); else this.upgradeButton.disableInteractive();
+      const qualityCost = upgradeCost(building, 'quality'); const capacityCost = upgradeCost(building, 'capacity');
+      const qualityAffordable = canAffordUpgrade(this.state.resources, building, 'quality'); const capacityAffordable = canAffordUpgrade(this.state.resources, building, 'capacity');
+      this.buildingUpgradeCost.setText(`QUALITY: ${upgradeDescription(building, 'quality')}  ·  ${qualityCost.glow}G/${qualityCost.alloy}A\nCAPACITY: ${upgradeDescription(building, 'capacity')}  ·  ${capacityCost.glow}G/${capacityCost.alloy}A`);
+      this.upgradeButton.setAlpha(qualityAffordable ? 1 : 0.48); this.capacityUpgradeButton.setAlpha(capacityAffordable ? 1 : 0.48);
+      if (qualityAffordable) this.upgradeButton.setInteractive({ useHandCursor: true }); else this.upgradeButton.disableInteractive();
+      if (capacityAffordable) this.capacityUpgradeButton.setInteractive({ useHandCursor: true }); else this.capacityUpgradeButton.disableInteractive();
     }
   }
   private updateObjective(state: WorldState) {
@@ -222,11 +245,11 @@ export class UIScene extends Phaser.Scene {
     if (!building) return;
     this.selectedBuildingId = building.id; this.creaturePanel.setVisible(false); this.buildingPanel.setVisible(true); this.renderBuilding(building);
   };
-  private upgradeSelectedBuilding() {
+  private upgradeSelectedBuilding(branch: 'quality' | 'capacity') {
     if (!this.selectedBuildingId) return;
     const building = this.state.buildings.find((candidate) => candidate.id === this.selectedBuildingId); if (!building) return;
-    if (gameStore.upgradeBuilding(building.id)) {
-      this.showToast(`${BUILDINGS[building.kind].upgrade.name} online · capacity and output increased`);
+    if (gameStore.upgradeBuilding(building.id, branch)) {
+      this.showToast(`${branch === 'quality' ? 'Quality' : 'Capacity'} construction started · builders will carry the work`);
       this.game.events.emit('glitch', 0.22);
     } else this.showToast('Not enough GLOW or ALLOY for this upgrade');
   }

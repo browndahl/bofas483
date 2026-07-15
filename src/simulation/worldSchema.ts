@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createCreaturePersonality } from './personality';
 import { ensureCreatureLife } from './colonyLife';
+import { ensureBuildingLife, ensureCreatureHistory, ensureLivingWorld } from './livingWorld';
 import type { WorldState } from './worldState';
 import { MAX_EVENT_HISTORY } from './worldState';
 
@@ -20,22 +21,45 @@ const creature = z.object({
   id: z.string().min(1).max(40), name: z.string().min(1).max(80), x: finite, y: finite,
   target: vec2, destinationBuildingId: z.string().max(40).optional(), destinationCreatureId: z.string().max(40).optional(),
   navigationPath: z.array(vec2).max(128).optional(), navigationTarget: vec2.optional(), needs,
-  task: z.enum(['wander', 'eat', 'bathe', 'play', 'sleep', 'work', 'heal', 'socialize', 'comfort', 'dead']), age: finite,
+  task: z.enum(['wander', 'eat', 'bathe', 'play', 'sleep', 'work', 'heal', 'socialize', 'comfort', 'construct', 'maintain', 'celebrate', 'argue', 'dead']), age: finite,
   exposure: finite, reproduction: finite, alive: z.boolean(), deathAge: finite.optional(), generation: z.number().int().min(0), hue: finite,
   personality: creaturePersonality.optional(), bonds: z.record(finite.min(0).max(100)).optional(),
   role: role.optional(), skills: skills.optional(), preferences: preferences.optional(), ambition: ambition.optional(),
   socialCooldown: finite.nonnegative().optional(), socialTimer: finite.nonnegative().optional(), socialPursuitTimer: finite.nonnegative().optional(),
-  socialTarget: vec2.optional(), stuckTimer: finite.nonnegative().optional(), queueIndex: z.number().int().min(0).optional(), isBeingServed: z.boolean().optional()
+  socialTarget: vec2.optional(), stuckTimer: finite.nonnegative().optional(), queueIndex: z.number().int().min(0).optional(), isBeingServed: z.boolean().optional(),
+  assignedRole: role.optional(), autoRole: z.boolean().optional(), stress: finite.min(0).max(100).optional(), traits: z.array(z.string().max(40)).max(16).optional(),
+  memories: z.array(z.object({ id: z.string().max(100), at: finite, text: z.string().max(240), valence: z.union([z.literal(-1), z.literal(0), z.literal(1)]) })).max(24).optional(),
+  history: z.array(z.object({ at: finite, title: z.string().max(100), detail: z.string().max(240) })).max(100).optional(),
+  parentId: z.string().max(40).optional(), childrenIds: z.array(z.string().max(40)).max(32).optional(), mentorId: z.string().max(40).optional(),
+  favoriteFood: z.string().max(60).optional(), favoriteCompanionId: z.string().max(40).optional(), routeMemory: z.array(vec2).max(12).optional(),
+  voiceStyle: z.enum(['chirpy', 'round', 'whispery', 'raspy', 'musical']).optional(), voiceCooldown: finite.nonnegative().optional(), ageMilestone: z.number().int().min(0).optional(), currentConcern: z.string().max(120).optional()
 });
 const building = z.object({
   id: z.string().min(1).max(40), kind: z.enum(['nutrient-bed', 'wash-pool', 'resonance-garden', 'nest', 'extractor', 'clinic']),
-  x: finite, y: finite, level: z.number().int().min(1).max(2), active: z.boolean()
+  x: finite, y: finite, level: z.number().int().min(1).max(2), active: z.boolean(), upgradeBranch: z.enum(['quality', 'capacity']).optional(),
+  durability: finite.min(0).max(100).optional(), constructionProgress: finite.min(0).max(100).optional(), constructing: z.boolean().optional(), influenceRadius: finite.min(50).max(400).optional()
 });
 const personality = z.object({
   empathy: finite, exploitation: finite, sustainability: finite, curiosity: finite,
   ambition: finite, obedience: finite, aggression: finite, honesty: finite
 });
 const event = z.object({ type: z.string().min(1).max(80), at: finite, payload: z.record(z.unknown()) });
+const research = z.object({ care: z.number().int().min(0).max(5), nature: z.number().int().min(0).max(5), technology: z.number().int().min(0).max(5), society: z.number().int().min(0).max(5), exploration: z.number().int().min(0).max(5) });
+const settings = z.object({
+  muted: z.boolean(), voiceVolume: finite.min(0).max(1), ambienceVolume: finite.min(0).max(1), textScale: finite.min(0.8).max(1.5), highContrast: z.boolean(), colorBlind: z.boolean(),
+  reducedMotion: z.boolean(), screenShake: z.boolean(), lowPower: z.boolean(), quality: z.enum(['low', 'medium', 'high']), offlineLimitMinutes: z.number().int().min(0).max(240),
+  simulationSpeed: z.union([z.literal(1), z.literal(2), z.literal(4)]), paused: z.boolean(), subtitles: z.boolean(), tutorial: z.boolean(), alertLevel: z.enum(['critical', 'important', 'all'])
+});
+const livingWorld = z.object({
+  reputation: finite.nonnegative(), level: z.number().int().min(1).max(5), title: z.string().max(100), researchPoints: finite.nonnegative(), research,
+  unlockedRegions: z.array(z.string().max(80)).max(12), rareResources: z.object({ memoryCrystal: z.number().int().nonnegative(), wildSeed: z.number().int().nonnegative() }),
+  day: z.number().int().min(1), dayTime: finite.min(0).max(1), season: z.enum(['bloom', 'suncrest', 'amberfall', 'frostquiet']), weather: z.enum(['clear', 'mist', 'rain', 'wind', 'storm']),
+  weatherTimer: finite, lastDailyEventDay: z.number().int().min(0),
+  alerts: z.array(z.object({ id: z.string().max(100), severity: z.enum(['info', 'warning', 'critical']), title: z.string().max(100), detail: z.string().max(240), at: finite, dismissed: z.boolean() })).max(20),
+  journal: z.array(z.object({ id: z.string().max(120), at: finite, category: z.enum(['discovery', 'event', 'weather', 'relationship', 'birth', 'loss', 'milestone']), title: z.string().max(160), detail: z.string().max(300) })).max(120),
+  challenges: z.array(z.object({ id: z.string().max(100), title: z.string().max(100), description: z.string().max(240), progress: finite.nonnegative(), target: finite.positive(), complete: z.boolean() })).max(20),
+  settings, telemetry: z.object({ averageTickMs: finite.nonnegative(), peakTickMs: finite.nonnegative(), fps: finite.nonnegative(), creatures: z.number().int().nonnegative(), visibleCreatures: z.number().int().nonnegative(), pathRecoveries: z.number().int().nonnegative() }), saveVersion: z.number().int().min(2)
+});
 
 const schema = z.object({
   version: z.literal(1), seed: finite, time: finite.nonnegative(), chapter: z.number().int().min(1).max(5),
@@ -45,7 +69,7 @@ const schema = z.object({
   technologies: z.array(z.string().max(80)).max(100), completedObjectives: z.array(z.string().max(80)).max(100),
   dialogueHistory: z.array(z.string().max(80)).max(100), profile: personality,
   events: z.array(event).max(2000), deaths: z.number().int().min(0).max(250), populationPeak: z.number().int().min(1).max(250),
-  endingId: z.string().max(80).optional()
+  endingId: z.string().max(80).optional(), livingWorld: livingWorld.optional()
 }).refine((world) => world.pollution.length === world.pollutionWidth * world.pollutionHeight, { message: 'Invalid pollution grid' });
 
 export function parseWorldState(value: unknown): WorldState | null {
@@ -60,8 +84,11 @@ export function parseWorldState(value: unknown): WorldState | null {
     creatureState.socialPursuitTimer ??= 0;
     creatureState.stuckTimer ??= 0;
     ensureCreatureLife(creatureState as WorldState['creatures'][number]);
+    ensureCreatureHistory(creatureState as WorldState['creatures'][number]);
   });
   const world = result.data as WorldState;
+  world.buildings.forEach(ensureBuildingLife);
+  ensureLivingWorld(world);
   if (world.events.length > MAX_EVENT_HISTORY) world.events = world.events.slice(-MAX_EVENT_HISTORY);
   return world;
 }

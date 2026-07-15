@@ -11,12 +11,19 @@ import { GlitchOverlayScene } from './scenes/GlitchOverlayScene';
 import { AuthScene } from './scenes/AuthScene';
 import { GuideScene } from './scenes/GuideScene';
 import { AwaySummaryScene } from './scenes/AwaySummaryScene';
+import { ColonyScene } from './scenes/ColonyScene';
 import { gameStore } from './state/gameStateStore';
 import { saveService } from './services/saveService';
 import './style.css';
 
 const sentryDsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
-if (sentryDsn) Sentry.init({ dsn: sentryDsn, environment: import.meta.env.MODE, tracesSampleRate: 0.1 });
+if (sentryDsn) Sentry.init({
+  dsn: sentryDsn,
+  environment: import.meta.env.MODE,
+  tracesSampleRate: 0.1,
+  sendDefaultPii: false,
+  beforeSend(event) { delete event.user; delete event.request; return event; }
+});
 
 window.addEventListener('worker-error', (event) => Sentry.captureException(new Error((event as CustomEvent<string>).detail)));
 window.addEventListener('unhandledrejection', (event) => Sentry.captureException(event.reason));
@@ -32,7 +39,7 @@ const game = new Phaser.Game({
   fps: { target: 60, min: 30, smoothStep: true },
   input: { activePointers: 3 },
   dom: { createContainer: true },
-  scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene, GuideScene, AwaySummaryScene]
+  scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene, GuideScene, AwaySummaryScene, ColonyScene]
 });
 
 const restored = saveService.loadLocalWithProgress();

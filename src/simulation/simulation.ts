@@ -1,6 +1,7 @@
 import { buildingCapacity, buildingEffectMultiplier, buildingPollution, buildingStation, taskBuilding } from './building';
 import { advanceReproduction, chooseTask, decayNeeds, divideCreature } from './creature';
 import { skillEfficiency, skillForTask, trainSkill } from './colonyLife';
+import { addJournal, ensureBuildingLife, ensureCreatureHistory, ensureLivingWorld, remember, researchBonus, updateCreatureHistory, updateLivingWorld } from './livingWorld';
 import { buildNavigationPath, findSocialMeeting, isNavigationBlocked } from './navigation';
 import { setBond, socialCompatibility } from './personality';
 import { resolveObjectiveProgress } from './progression';
@@ -10,12 +11,13 @@ import { appendWorldEvent } from './worldState';
 
 const WORLD_WIDTH = 1600;
 const WORLD_HEIGHT = 1000;
-const SOCIAL_TASKS = new Set<TaskType>(['socialize', 'comfort']);
+const SOCIAL_TASKS = new Set<TaskType>(['socialize', 'comfort', 'argue']);
 const MAX_SOCIAL_PURSUIT = 8;
 const STUCK_REPATH_SECONDS = 2.2;
 
-interface SocialPlan { partnerId: string; task: 'socialize' | 'comfort'; target: Vec2 }
+interface SocialPlan { partnerId: string; task: 'socialize' | 'comfort' | 'argue'; target: Vec2 }
 interface ServiceAssignment { building: BuildingState; queueIndex: number; target: Vec2; serving: boolean }
+const socialTask = (task: TaskType): SocialPlan['task'] => task === 'comfort' || task === 'argue' ? task : 'socialize';
 
 function taskUrgency(creature: CreatureState, task: TaskType) {
   if (task === 'heal') return 220 - creature.needs.health;
@@ -54,6 +56,24 @@ function buildServiceAssignments(creatures: CreatureState[], tasks: Map<string, 
     const queueIndex = loads.get(chosen.id) ?? 0;
     loads.set(chosen.id, queueIndex + 1);
     assignments.set(creature.id, { building: chosen, queueIndex, target: openStation(chosen, queueIndex, buildings), serving: queueIndex < buildingCapacity(chosen) });
+  }
+  return assignments;
+}
+
+function buildProjectAssignments(creatures: CreatureState[], tasks: Map<string, TaskType>, buildings: BuildingState[]) {
+  const assignments = new Map<string, ServiceAssignment>(); const loads = new Map<string, number>();
+  const workers = creatures.filter((creature) => creature.alive && ['construct', 'maintain'].includes(tasks.get(creature.id) ?? ''))
+    .sort((a, b) => b.personality.diligence - a.personality.diligence);
+  for (const creature of workers) {
+    const task = tasks.get(creature.id); const candidates = task === 'construct' ? buildings.filter((building) => building.constructing) : buildings.filter((building) => !building.constructing && building.durability < 70);
+    let chosen: BuildingState | undefined; let best = Number.POSITIVE_INFINITY;
+    for (const building of candidates) {
+      const load = loads.get(building.id) ?? 0; const score = Math.hypot(building.x - creature.x, building.y - creature.y) + load * 180;
+      if (score < best) { best = score; chosen = building; }
+    }
+    if (!chosen) continue;
+    const queueIndex = loads.get(chosen.id) ?? 0; loads.set(chosen.id, queueIndex + 1);
+    assignments.set(creature.id, { building: chosen, queueIndex, target: openStation(chosen, queueIndex, buildings), serving: queueIndex < 2 });
   }
   return assignments;
 }
@@ -105,7 +125,7 @@ function buildSocialPlans(creatures: CreatureState[], buildings: BuildingState[]
   const byId = new Map(creatures.map((creature) => [creature.id, creature]));
   const reserved = new Set<string>();
   const eligible = creatures.filter((creature) => canSocialize(creature, buildings));
-  const pair = (first: CreatureState, second: CreatureState, firstTask: 'socialize' | 'comfort', secondTask: 'socialize' | 'comfort' = 'socialize', firstTarget?: Vec2, secondTarget?: Vec2) => {
+  const pair = (first: CreatureState, second: CreatureState, firstTask: 'socialize' | 'comfort' | 'argue', secondTask: 'socialize' | 'comfort' | 'argue' = 'socialize', firstTarget?: Vec2, secondTarget?: Vec2) => {
     const meeting = firstTarget && secondTarget ? { first: firstTarget, second: secondTarget } : findSocialMeeting(first, second, buildings);
     if (!meeting) return false;
     plans.set(first.id, { partnerId: second.id, task: firstTask, target: meeting.first });
@@ -122,7 +142,7 @@ function buildSocialPlans(creatures: CreatureState[], buildings: BuildingState[]
     if (!second || reserved.has(second.id) || second.destinationCreatureId !== first.id || !second.socialTarget || !canSocialize(second, buildings, comforting)) continue;
     if (Math.hypot(first.x - second.x, first.y - second.y) > 500) continue;
     if (isNavigationBlocked(first.socialTarget, buildings) || isNavigationBlocked(second.socialTarget, buildings)) continue;
-    pair(first, second, first.task === 'comfort' ? 'comfort' : 'socialize', second.task === 'comfort' ? 'comfort' : 'socialize', first.socialTarget, second.socialTarget);
+    pair(first, second, socialTask(first.task), socialTask(second.task), first.socialTarget, second.socialTarget);
   }
 
   // Empathetic care gets first claim on an available partner.
@@ -146,10 +166,15 @@ function buildSocialPlans(creatures: CreatureState[], buildings: BuildingState[]
       if (candidate.id === actor.id || reserved.has(candidate.id) || candidate.needs.health < 30 || candidate.needs.hunger < 25) continue;
       const distance = Math.hypot(candidate.x - actor.x, candidate.y - actor.y); if (distance > 320) continue;
       if (!wantsCompany(actor, time) && !wantsCompany(candidate, time)) continue;
-      const score = socialCompatibility(actor, candidate) - distance / 1200;
+      const compatibility = socialCompatibility(actor, candidate);
+      if (compatibility < 0.24 && (Math.floor(time / 13) + Number(actor.id.replace(/\D/g, ''))) % 9 === 0) { partner = candidate; bestScore = 2; break; }
+      const score = compatibility - distance / 1200;
       if (score > bestScore) { bestScore = score; partner = candidate; }
     }
-    if (partner) pair(actor, partner, 'socialize');
+    if (partner) {
+      const conflict = socialCompatibility(actor, partner) < 0.24;
+      pair(actor, partner, conflict ? 'argue' : 'socialize', conflict ? 'argue' : 'socialize');
+    }
   }
   return plans;
 }
@@ -231,11 +256,15 @@ function applySocialInteractions(world: WorldState, seconds: number) {
     if (processed.has(pairKey)) continue;
     processed.add(pairKey);
     const comforting = actor.task === 'comfort' || partner.task === 'comfort';
+    const arguing = actor.task === 'argue' || partner.task === 'argue';
     const previousBond = Math.max(actor.bonds[partner.id] ?? 0, partner.bonds[actor.id] ?? 0);
-    const bondGain = seconds * (comforting ? 2.5 : 1.7) * (0.75 + (actor.personality.sociability + partner.personality.sociability) * 0.25);
-    const nextBond = Math.min(100, previousBond + bondGain);
+    const bondGain = seconds * (comforting ? 2.5 : arguing ? -1.15 : 1.7) * (0.75 + (actor.personality.sociability + partner.personality.sociability) * 0.25) * researchBonus(world, 'society');
+    const nextBond = Math.max(0, Math.min(100, previousBond + bondGain));
     setBond(actor, partner.id, nextBond); setBond(partner, actor.id, nextBond);
-    if (comforting) {
+    if (arguing) {
+      actor.needs.happiness = Math.max(0, actor.needs.happiness - seconds * 1.6); partner.needs.happiness = Math.max(0, partner.needs.happiness - seconds * 1.6);
+      actor.stress = Math.min(100, actor.stress + seconds * 1.2); partner.stress = Math.min(100, partner.stress + seconds * 1.2);
+    } else if (comforting) {
       const recipient = actor.task === 'comfort' ? partner : actor;
       recipient.needs.happiness = Math.min(100, recipient.needs.happiness + seconds * (3.8 + Math.max(actor.personality.empathy, partner.personality.empathy) * 2.2));
       actor.needs.happiness = Math.min(100, actor.needs.happiness + seconds * 1.2);
@@ -246,8 +275,17 @@ function applySocialInteractions(world: WorldState, seconds: number) {
     }
     trainAndCelebrate(world, actor, actor.task, seconds, 1.2);
     trainAndCelebrate(world, partner, partner.task, seconds, 1.2);
+    if (!arguing && Math.abs(actor.age - partner.age) > 25) {
+      const mentor = actor.age > partner.age ? actor : partner; const student = mentor === actor ? partner : actor;
+      const skill = Object.entries(mentor.skills).sort((a, b) => b[1] - a[1])[0][0] as keyof typeof mentor.skills;
+      if (mentor.skills[skill] > student.skills[skill] + 12) { student.skills[skill] = Math.min(100, student.skills[skill] + seconds * 0.22); student.mentorId = mentor.id; }
+    }
     const crossed = [20, 50, 80].find((threshold) => previousBond < threshold && nextBond >= threshold);
-    if (crossed) appendWorldEvent(world, { type: 'social_bond', at: world.time, payload: { a: actor.id, b: partner.id, strength: crossed, kind: comforting ? 'comfort' : 'friendship' } });
+    if (crossed) {
+      const event = { type: 'social_bond', at: world.time, payload: { a: actor.id, b: partner.id, strength: crossed, kind: comforting ? 'comfort' : 'friendship' } };
+      appendWorldEvent(world, event); remember(actor, event, `${partner.name} became an important companion.`, 1); remember(partner, event, `${actor.name} became an important companion.`, 1);
+      addJournal(world, { category: 'relationship', title: `${actor.name} and ${partner.name} grow closer`, detail: `Their bond reached ${crossed}%.` });
+    }
   }
 }
 
@@ -277,11 +315,14 @@ function pollutionAt(world: WorldState, x: number, y: number): number {
 
 export function tickWorld(world: WorldState, seconds: number): WorldState {
   const next = structuredClone(world);
+  ensureLivingWorld(next); next.creatures.forEach(ensureCreatureHistory); next.buildings.forEach(ensureBuildingLife);
   next.time += seconds;
-  const sources = next.buildings.map((building) => ({ x: building.x, y: building.y, amount: buildingPollution(building) }));
+  const natureProtection = researchBonus(next, 'nature');
+  const sources = next.buildings.map((building) => ({ x: building.x, y: building.y, amount: buildingPollution(building) / natureProtection }));
   next.pollution = spreadPollution(next.pollution, next.pollutionWidth, next.pollutionHeight, sources, seconds);
   const buildingsByKind = new Map<BuildingKind, BuildingState[]>();
   next.buildings.forEach((building) => {
+    if (building.active && !building.constructing) building.durability = Math.max(0, building.durability - seconds * (building.kind === 'extractor' ? 0.009 : 0.0035));
     if (!building.active) return;
     const group = buildingsByKind.get(building.kind) ?? [];
     group.push(building); buildingsByKind.set(building.kind, group);
@@ -289,6 +330,7 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
   next.creatures = next.creatures.map((raw) => {
     if (!raw.alive) return raw;
     const creature = advanceReproduction(decayNeeds(raw, seconds, pollutionAt(next, raw.x, raw.y)), seconds);
+    updateCreatureHistory(creature, seconds);
     creature.socialCooldown = Math.max(0, creature.socialCooldown - seconds);
     if (creature.socialTimer > 0) {
       creature.socialTimer = Math.max(0, creature.socialTimer - seconds);
@@ -307,6 +349,7 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
   const socialPlans = buildSocialPlans(next.creatures, next.buildings, next.time);
   const taskPlans = new Map(next.creatures.filter((creature) => creature.alive).map((creature) => [creature.id, socialPlans.get(creature.id)?.task ?? chooseTask(creature, next.buildings)]));
   const serviceAssignments = buildServiceAssignments(next.creatures, taskPlans, buildingsByKind, next.buildings);
+  buildProjectAssignments(next.creatures, taskPlans, next.buildings).forEach((assignment, id) => serviceAssignments.set(id, assignment));
   const socialGrid = new SpatialGrid<CreatureState>(128); socialGrid.rebuild(next.creatures.filter((creature) => creature.alive));
   const newborns: CreatureState[] = [];
   next.creatures = next.creatures.map((creature) => {
@@ -348,6 +391,7 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
     if (socialPlan && creature.socialTimer <= 0) creature.socialPursuitTimer += seconds;
     if (creature.stuckTimer >= STUCK_REPATH_SECONDS) {
       creature.navigationPath = []; creature.navigationTarget = undefined; creature.stuckTimer = 0;
+      next.livingWorld.telemetry.pathRecoveries++;
       if (socialPlan) creature.socialPursuitTimer += 2.5;
       else if (task === 'wander') creature.target = { x: creature.x, y: creature.y };
     }
@@ -356,12 +400,19 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
       const skill = skillForTask(task);
       const preference = creature.preferences.favoriteBuilding === building.kind ? 1.05 : 1;
       const efficiency = buildingEffectMultiplier(building) * preference * (skill ? skillEfficiency(creature, skill) : 1);
-      if (task === 'eat') creature.needs.hunger = Math.min(100, creature.needs.hunger + 16 * efficiency * seconds);
-      if (task === 'bathe') creature.needs.hygiene = Math.min(100, creature.needs.hygiene + 19 * efficiency * seconds);
+      const careBonus = researchBonus(next, 'care');
+      if (task === 'eat') creature.needs.hunger = Math.min(100, creature.needs.hunger + 16 * efficiency * careBonus * seconds);
+      if (task === 'bathe') creature.needs.hygiene = Math.min(100, creature.needs.hygiene + 19 * efficiency * careBonus * seconds);
       if (task === 'play') creature.needs.happiness = Math.min(100, creature.needs.happiness + 14 * efficiency * seconds);
       if (task === 'sleep') creature.needs.energy = Math.min(100, creature.needs.energy + 20 * efficiency * seconds);
-      if (task === 'heal') { creature.needs.health = Math.min(100, creature.needs.health + 8 * efficiency * seconds); creature.exposure = Math.max(0, creature.exposure - 5 * efficiency * seconds); }
+      if (task === 'heal') { creature.needs.health = Math.min(100, creature.needs.health + 8 * efficiency * careBonus * seconds); creature.exposure = Math.max(0, creature.exposure - 5 * efficiency * careBonus * seconds); }
       if (task === 'work') { next.resources.alloy += 0.8 * efficiency * seconds; next.resources.glow += 0.35 * efficiency * seconds; creature.needs.happiness = Math.max(0, creature.needs.happiness - 0.9 * seconds); }
+      if (task === 'construct') {
+        const before = building.constructionProgress; building.constructionProgress = Math.min(100, building.constructionProgress + 5.2 * skillEfficiency(creature, 'building') * researchBonus(next, 'technology') * seconds);
+        trainSkill(creature, 'building', seconds, 1.4);
+        if (before < 100 && building.constructionProgress >= 100) { building.constructing = false; building.active = true; building.durability = 100; appendWorldEvent(next, { type: 'construction_complete', at: next.time, payload: { buildingId: building.id, kind: building.kind } }); addJournal(next, { category: 'milestone', title: `${building.kind} construction complete`, detail: `${creature.name} finished the final connection.` }); }
+      }
+      if (task === 'maintain') { building.durability = Math.min(100, building.durability + 7 * skillEfficiency(creature, 'building') * seconds); trainSkill(creature, 'building', seconds, 1.15); }
       trainAndCelebrate(next, creature, task, seconds, building.level >= 2 ? 1.12 : 1);
     }
     if (creature.reproduction >= 100 && next.creatures.length + newborns.length < 250) newborns.push(divideCreature(creature, next));
@@ -372,9 +423,11 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
   if (newborns.length) {
     next.creatures.push(...newborns);
     appendWorldEvent(next, { type: 'division', at: next.time, payload: { count: newborns.length } });
+    newborns.forEach((child) => addJournal(next, { category: 'birth', title: `${child.name} joins the chorus`, detail: `Generation ${child.generation}, child of ${next.creatures.find((creature) => creature.id === child.parentId)?.name ?? 'the habitat'}.` }));
   }
   const living = next.creatures.filter((creature) => creature.alive).length;
   next.populationPeak = Math.max(next.populationPeak, living);
   next.chapter = living >= 14 || next.deaths >= 3 ? 4 : living >= 8 ? 3 : living >= 3 ? 2 : 1;
+  updateLivingWorld(next, seconds);
   return resolveObjectiveProgress(next);
 }
