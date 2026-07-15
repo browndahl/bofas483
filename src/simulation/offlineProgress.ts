@@ -11,6 +11,7 @@ export interface OfflineSummary {
   protectedLuma: number;
   livingAtStart: number;
   livingAtEnd: number;
+  importantEvents: string[];
 }
 
 const MAX_OFFLINE_SECONDS = 15 * 60;
@@ -30,7 +31,9 @@ export function advanceOfflineWorld(world: WorldState, elapsedSeconds: number): 
   const before = structuredClone(world);
   const initialCount = before.creatures.length;
   const initialCloseBonds = closeBondCount(before.creatures);
-  const simulatedSeconds = Math.min(MAX_OFFLINE_SECONDS, elapsedSeconds);
+  const configuredLimit = Math.max(0, Math.min(240, world.livingWorld?.settings.offlineLimitMinutes ?? 15)) * 60;
+  if (configuredLimit === 0) return { state: world };
+  const simulatedSeconds = Math.min(configuredLimit || MAX_OFFLINE_SECONDS, elapsedSeconds);
   let state = structuredClone(before);
   let remaining = simulatedSeconds;
   const protectedIds = new Set<string>();
@@ -68,7 +71,8 @@ export function advanceOfflineWorld(world: WorldState, elapsedSeconds: number): 
     strongerBonds: Math.max(0, closeBondCount(state.creatures) - initialCloseBonds),
     protectedLuma: protectedIds.size,
     livingAtStart: before.creatures.filter((creature) => creature.alive).length,
-    livingAtEnd: state.creatures.filter((creature) => creature.alive).length
+    livingAtEnd: state.creatures.filter((creature) => creature.alive).length,
+    importantEvents: state.livingWorld.journal.slice(before.livingWorld.journal.length).slice(-4).map((entry) => entry.title)
   };
   return { state, summary };
 }

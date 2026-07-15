@@ -16,7 +16,11 @@ self.onmessage = (event: MessageEvent<{ type: string; state?: WorldState }>) => 
       const now = performance.now();
       const seconds = Math.max(0.01, Math.min(1, (now - lastTick) / 1000));
       lastTick = now;
-      state = tickWorld(state, seconds);
+      const started = performance.now();
+      if (!state.livingWorld.settings.paused) state = tickWorld(state, seconds * state.livingWorld.settings.simulationSpeed);
+      const duration = performance.now() - started;
+      state.livingWorld.telemetry.averageTickMs = state.livingWorld.telemetry.averageTickMs * 0.92 + duration * 0.08;
+      state.livingWorld.telemetry.peakTickMs = Math.max(state.livingWorld.telemetry.peakTickMs * 0.997, duration);
       self.postMessage({ type: 'state', state });
     }, 200);
   }

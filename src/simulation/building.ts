@@ -52,30 +52,45 @@ export function validateBuildingPlacement(buildings: BuildingState[], x: number,
 }
 
 export function createBuilding(kind: BuildingKind, x: number, y: number, index: number): BuildingState {
-  return { id: `b${index}`, kind, x, y, level: 1, active: true };
+  return { id: `b${index}`, kind, x, y, level: 1, active: true, durability: 100, constructionProgress: 100, constructing: false, influenceRadius: 130 };
 }
 
 export function buildingDisplayName(building: BuildingState) {
-  return building.level >= 2 ? BUILDINGS[building.kind].upgrade.name : BUILDINGS[building.kind].name;
+  if (building.level < 2) return BUILDINGS[building.kind].name;
+  return building.upgradeBranch === 'capacity' ? `${BUILDINGS[building.kind].name} Commons` : BUILDINGS[building.kind].upgrade.name;
 }
 
 export function buildingCapacity(building: BuildingState) {
-  return BUILDINGS[building.kind].capacity + (building.level >= 2 ? 1 : 0);
+  return BUILDINGS[building.kind].capacity + (building.level >= 2 ? building.upgradeBranch === 'capacity' ? 2 : 1 : 0);
 }
 
 export function buildingEffectMultiplier(building: BuildingState) {
-  if (building.level < 2) return 1;
-  return building.kind === 'extractor' ? 1.3 : 1.35;
+  const condition = building.durability < 30 ? 0.72 : building.durability < 60 ? 0.9 : 1;
+  if (building.level < 2) return condition;
+  return (building.upgradeBranch === 'capacity' ? 1.14 : building.kind === 'extractor' ? 1.3 : 1.35) * condition;
 }
 
 export function buildingPollution(building: BuildingState) {
   const base = BUILDINGS[building.kind].pollution;
-  return building.level >= 2 && building.kind === 'extractor' ? base * 0.75 : base;
+  const maintenanceLeak = building.durability < 35 ? 1.25 : 1;
+  return (building.level >= 2 && building.kind === 'extractor' && building.upgradeBranch !== 'capacity' ? base * 0.75 : base) * maintenanceLeak;
 }
 
-export function canAffordUpgrade(resources: Resources, building: BuildingState) {
-  if (building.level >= 2) return false;
+export function upgradeCost(building: BuildingState, branch: 'quality' | 'capacity' = 'quality') {
   const cost = BUILDINGS[building.kind].upgrade.cost;
+  return branch === 'capacity' ? { glow: Math.ceil(cost.glow * 0.82), alloy: Math.ceil(cost.alloy * 1.16) } : cost;
+}
+
+export function upgradeDescription(building: BuildingState, branch: 'quality' | 'capacity') {
+  const def = BUILDINGS[building.kind];
+  return branch === 'capacity'
+    ? { name: `${def.name} Commons`, description: 'An expanded service wing keeps crowded colonies moving.', effect: '+2 service stations and +14% output.' }
+    : def.upgrade;
+}
+
+export function canAffordUpgrade(resources: Resources, building: BuildingState, branch: 'quality' | 'capacity' = 'quality') {
+  if (building.level >= 2) return false;
+  const cost = upgradeCost(building, branch);
   return resources.glow >= cost.glow && resources.alloy >= cost.alloy;
 }
 

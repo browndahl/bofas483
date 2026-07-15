@@ -10,8 +10,8 @@ jobs:
   app:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -20,6 +20,16 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - name: Deployment smoke test
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 &
+          server_pid=$!
+          trap 'kill $server_pid' EXIT
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent http://127.0.0.1:4173/ | grep --quiet 'bofas483 game canvas'; then exit 0; fi
+            sleep 1
+          done
+          exit 1
       - uses: supabase/setup-cli@v1
         with:
           version: latest

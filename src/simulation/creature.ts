@@ -31,6 +31,8 @@ export function chooseTask(creature: CreatureState, buildings: BuildingState[]):
   if (creature.needs.hygiene < 38) return 'bathe';
   if (creature.needs.energy < 30) return 'sleep';
   if (creature.needs.happiness < 42) return 'play';
+  if (buildings.some((building) => building.constructing || building.constructionProgress < 100) && creature.needs.energy > 45 && creature.needs.hunger > 52) return 'construct';
+  if (buildings.some((building) => building.durability < 45) && creature.personality.diligence > 0.48 && creature.needs.energy > 40) return 'maintain';
   if (buildings.some((b) => b.kind === 'extractor' && b.active)) return 'work';
   return 'wander';
 }
@@ -53,6 +55,10 @@ export function divideCreature(parent: CreatureState, world: WorldState): Creatu
   parent.needs.energy = Math.max(30, parent.needs.energy - 30);
   parent.needs.hunger = Math.max(35, parent.needs.hunger - 22);
   const child = makeCreature(id, parent.x + 26, parent.y + 10, parent.generation + 1, parent.personality);
+  child.parentId = parent.id; child.mentorId = parent.id; parent.childrenIds.push(child.id);
+  if (parent.traits.length && (world.creatures.length + parent.generation) % 3 === 0) child.traits.push(parent.traits[world.creatures.length % parent.traits.length]);
+  child.history.push({ at: world.time, title: 'Born in the habitat', detail: `${parent.name} is recorded as parent and first mentor.` });
+  parent.history.push({ at: world.time, title: 'Welcomed a child', detail: `${child.name} joined the family line.` });
   connectParentAndChild(parent, child);
   return child;
 }

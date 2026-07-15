@@ -1,5 +1,6 @@
-import { BUILDINGS, canAfford, canAffordUpgrade, createBuilding, validateBuildingPlacement } from '../simulation/building';
-import type { BuildingKind, CreatureState, NeedKey, WorldState } from '../simulation/worldState';
+import { BUILDINGS, canAfford, canAffordUpgrade, createBuilding, upgradeCost, validateBuildingPlacement } from '../simulation/building';
+import { addJournal, RESEARCH_BRANCHES } from '../simulation/livingWorld';
+import type { BuildingKind, CreatureRole, CreatureState, GameSettings, NeedKey, ResearchBranch, WorldState } from '../simulation/worldState';
 import { appendWorldEvent, createInitialWorld } from '../simulation/worldState';
 
 type Listener = (state: WorldState) => void;
@@ -42,23 +43,60 @@ class GameStateStore {
     if (!this.canPlace(kind, x, y).ok) return false;
     const cost = BUILDINGS[kind].cost;
     next.resources.glow -= cost.glow; next.resources.alloy -= cost.alloy;
-    next.buildings.push(createBuilding(kind, x, y, next.buildings.length + 1));
+    const building = createBuilding(kind, x, y, next.buildings.length + 1);
+    building.active = false; building.constructionProgress = 0; building.constructing = true;
+    next.buildings.push(building);
     next.profile.ambition += kind === 'extractor' ? 2 : 0.5;
     next.profile.sustainability += BUILDINGS[kind].pollution === 0 ? 0.5 : -1;
     appendWorldEvent(next, { type: 'place_building', at: next.time, payload: { kind, x, y } });
     this.set(next); return true;
   }
-  upgradeBuilding(id: string) {
+  upgradeBuilding(id: string, branch: 'quality' | 'capacity' = 'quality') {
     const next = structuredClone(this.state);
     const building = next.buildings.find((candidate) => candidate.id === id);
-    if (!building || !canAffordUpgrade(next.resources, building)) return false;
-    const cost = BUILDINGS[building.kind].upgrade.cost;
+    if (!building || !canAffordUpgrade(next.resources, building, branch)) return false;
+    const cost = upgradeCost(building, branch);
     next.resources.glow -= cost.glow; next.resources.alloy -= cost.alloy;
-    building.level = 2;
+    building.level = 2; building.upgradeBranch = branch; building.constructionProgress = 65; building.constructing = true; building.active = false;
     next.profile.ambition += 1;
     next.profile.sustainability += building.kind === 'extractor' ? 0.6 : 0.25;
-    appendWorldEvent(next, { type: 'upgrade_building', at: next.time, payload: { id: building.id, kind: building.kind, level: building.level } });
+    appendWorldEvent(next, { type: 'upgrade_building', at: next.time, payload: { id: building.id, kind: building.kind, level: building.level, branch } });
+    addJournal(next, { category: 'milestone', title: `${branch === 'quality' ? 'Quality' : 'Capacity'} upgrade begun`, detail: `${BUILDINGS[building.kind].name} awaits skilled construction.` });
     this.set(next); return true;
+  }
+  assignRole(id: string, role: CreatureRole | 'auto') {
+    const next = structuredClone(this.state); const creature = next.creatures.find((candidate) => candidate.id === id && candidate.alive); if (!creature) return false;
+    creature.autoRole = role === 'auto'; creature.assignedRole = role === 'auto' ? creature.role : role;
+    creature.history.push({ at: next.time, title: role === 'auto' ? 'Autonomy restored' : `Assigned ${role}`, detail: role === 'auto' ? 'Allowed to choose work from personality again.' : 'The operator selected a colony role.' });
+    appendWorldEvent(next, { type: 'role_assignment', at: next.time, payload: { creatureId: id, role } }); this.set(next); return true;
+  }
+  renameCreature(id: string, name: string) {
+    const clean = name.trim().slice(0, 24); if (!clean) return false;
+    const next = structuredClone(this.state); const creature = next.creatures.find((candidate) => candidate.id === id); if (!creature) return false;
+    const previous = creature.name; creature.name = clean; creature.history.push({ at: next.time, title: 'Received a new name', detail: `${previous} became ${clean}.` });
+    appendWorldEvent(next, { type: 'creature_renamed', at: next.time, payload: { creatureId: id, previous, name: clean } }); this.set(next); return true;
+  }
+  unlockResearch(branch: ResearchBranch) {
+    const next = structuredClone(this.state); const level = next.livingWorld.research[branch]; const cost = 20 + level * 15;
+    if (level >= 5 || next.livingWorld.researchPoints < cost) return false;
+    next.livingWorld.researchPoints -= cost; next.livingWorld.research[branch]++;
+    addJournal(next, { category: 'discovery', title: `${RESEARCH_BRANCHES[branch].name} research level ${level + 1}`, detail: RESEARCH_BRANCHES[branch].bonus });
+    appendWorldEvent(next, { type: 'research_unlock', at: next.time, payload: { branch, level: level + 1 } }); this.set(next); return true;
+  }
+  updateSetting<K extends keyof GameSettings>(key: K, value: GameSettings[K]) {
+    const next = structuredClone(this.state); next.livingWorld.settings[key] = value; this.set(next); return true;
+  }
+  cycleSpeed() {
+    const current = this.state.livingWorld.settings.simulationSpeed; const nextSpeed = current === 1 ? 2 : current === 2 ? 4 : 1;
+    return this.updateSetting('simulationSpeed', nextSpeed);
+  }
+  togglePause() { return this.updateSetting('paused', !this.state.livingWorld.settings.paused); }
+  dismissAlert(id: string) { const next = structuredClone(this.state); const alert = next.livingWorld.alerts.find((item) => item.id === id); if (!alert) return false; alert.dismissed = true; this.set(next); return true; }
+  undoLastBuild() {
+    const next = structuredClone(this.state); const event = [...next.events].reverse().find((item) => item.type === 'place_building' && next.time - item.at <= 30); if (!event) return false;
+    const building = next.buildings.find((item) => item.kind === event.payload.kind && Math.hypot(item.x - Number(event.payload.x), item.y - Number(event.payload.y)) < 2); if (!building || building.constructionProgress >= 100) return false;
+    const cost = BUILDINGS[building.kind].cost; next.resources.glow += cost.glow * 0.8; next.resources.alloy += cost.alloy * 0.8; next.buildings = next.buildings.filter((item) => item.id !== building.id);
+    appendWorldEvent(next, { type: 'undo_building', at: next.time, payload: { id: building.id } }); this.set(next); return true;
   }
   canPlace(kind: BuildingKind, x: number, y: number) {
     if (!canAfford(this.state.resources, kind)) return { ok: false, reason: 'Not enough GLOW or ALLOY' };

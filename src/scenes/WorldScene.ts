@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { BUILDINGS, buildingCapacity, buildingDisplayName } from '../simulation/building';
 import { personalityLabels } from '../simulation/personality';
-import { creatureVocalization, voicePitch, type CreatureMood } from '../simulation/vocalization';
+import { contextualVocalization, voicePitch, type CreatureMood, type VoiceContext } from '../simulation/vocalization';
 import type { BuildingKind, BuildingState, CreatureState, WorldState } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
 import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
@@ -20,6 +20,7 @@ interface CreatureView {
   thoughtText: Phaser.GameObjects.Text;
   lastAlive: boolean;
   visualSignature: string;
+  lastName: string;
 }
 
 interface AmbientMote { node: Phaser.GameObjects.Rectangle; originX: number; originY: number; phase: number; speed: number }
@@ -33,6 +34,9 @@ export class WorldScene extends Phaser.Scene {
   private buildingViews = new Map<string, Phaser.GameObjects.Container>();
   private pollutionGraphics!: Phaser.GameObjects.Graphics;
   private relationshipGraphics!: Phaser.GameObjects.Graphics;
+  private pathGraphics!: Phaser.GameObjects.Graphics;
+  private weatherGraphics!: Phaser.GameObjects.Graphics;
+  private dayOverlay!: Phaser.GameObjects.Rectangle;
   private selectedId = 'c1';
   private unsubscribe?: () => void;
   private state = gameStore.get();
@@ -43,12 +47,22 @@ export class WorldScene extends Phaser.Scene {
   private placementGhost?: Phaser.GameObjects.Container;
   private lastPinchDistance = 0;
   private effectPool: Phaser.GameObjects.Rectangle[] = [];
+  private footprintPool: Phaser.GameObjects.Rectangle[] = [];
+  private footprintCursor = 0;
+  private lastFootprintAt = 0;
   private ambientMotes: AmbientMote[] = [];
   private pollutionSignature = '';
   private audioContext?: AudioContext;
   private vocalBubbleUntil = new Map<string, number>();
   private vocalBubbleText = new Map<string, string>();
   private voiceClickCount = new Map<string, number>();
+  private voiceCooldownUntil = new Map<string, number>();
+  private lastAmbientVoiceAt = 0;
+  private lastAmbienceAt = 0;
+  private audioUnlocked = false;
+  private returnGreetingPending = false;
+  private photoMode = false;
+  private buildingSignature = '';
 
   constructor() { super('WorldScene'); }
   create() {
@@ -56,8 +70,12 @@ export class WorldScene extends Phaser.Scene {
     this.drawHabitat();
     this.pollutionGraphics = this.add.graphics().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
     this.relationshipGraphics = this.add.graphics().setDepth(8).setBlendMode(Phaser.BlendModes.ADD);
+    this.pathGraphics = this.add.graphics().setDepth(1);
+    this.weatherGraphics = this.add.graphics().setDepth(4).setBlendMode(Phaser.BlendModes.ADD);
+    this.dayOverlay = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_WIDTH, WORLD_HEIGHT, 0x08152a, 0).setDepth(40).setBlendMode(Phaser.BlendModes.MULTIPLY);
     this.configureInput();
     for (let i = 0; i < 24; i++) this.effectPool.push(this.add.rectangle(0, 0, 5, 5, 0x7af6bd, 0).setDepth(18));
+    for (let i = 0; i < 32; i++) this.footprintPool.push(this.add.rectangle(0, 0, 6, 3, 0x4b3e25, 0).setDepth(6));
     this.unsubscribe = gameStore.subscribe((state) => { this.state = state; this.syncState(state); });
     this.game.events.on('care', this.handleCare, this);
     this.game.events.on('build-select', this.handleBuildSelect, this);
@@ -70,6 +88,7 @@ export class WorldScene extends Phaser.Scene {
     const offlineSummary = this.registry.get('offline-summary');
     if (offlineSummary) {
       this.registry.remove('offline-summary');
+      this.returnGreetingPending = true;
       this.time.delayedCall(950, () => this.scene.launch('AwaySummaryScene', offlineSummary));
     }
     this.time.delayedCall(700, () => this.game.events.emit('open-dialogue', 'awakening'));
@@ -132,6 +151,13 @@ export class WorldScene extends Phaser.Scene {
       this.zoomAt(pointer.x, pointer.y, this.cameras.main.zoom - dy * 0.001);
     });
     this.input.keyboard?.on('keydown-ESC', () => this.cancelPlacement());
+    this.input.keyboard?.on('keydown-P', () => this.togglePhotoMode());
+    this.input.keyboard?.on('keydown-SPACE', () => gameStore.togglePause());
+    this.input.keyboard?.on('keydown-ONE', () => gameStore.updateSetting('simulationSpeed', 1));
+    this.input.keyboard?.on('keydown-TWO', () => gameStore.updateSetting('simulationSpeed', 2));
+    this.input.keyboard?.on('keydown-THREE', () => gameStore.updateSetting('simulationSpeed', 4));
+    this.input.keyboard?.on('keydown-G', () => this.scene.launch('GuideScene'));
+    this.input.keyboard?.on('keydown-U', () => this.game.events.emit('toast', gameStore.undoLastBuild() ? 'Recent construction undone · 80% of materials returned' : 'Nothing recent is safe to undo'));
   }
   private zoomAt(screenX: number, screenY: number, requestedZoom: number) {
     const camera = this.cameras.main;
@@ -166,8 +192,9 @@ export class WorldScene extends Phaser.Scene {
     this.placementGhost?.destroy();
     const def = BUILDINGS[kind];
     const base = this.add.image(0, 0, 'building-base').setTint(def.color).setAlpha(0.45);
+    const influence = this.add.circle(0, 0, 130, def.color, 0.055).setStrokeStyle(2, def.color, 0.32);
     const glyph = crisp(this.add.text(0, 0, def.glyph, { fontFamily: UI_FONT, fontSize: '28px', color: '#071410' })).setOrigin(0.5);
-    this.placementGhost = this.add.container(800, 500, [base, glyph]).setDepth(20);
+    this.placementGhost = this.add.container(800, 500, [influence, base, glyph]).setDepth(20);
     const pointer = this.input.activePointer;
     const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
     this.placementGhost.setPosition(point.x, point.y);
@@ -175,7 +202,7 @@ export class WorldScene extends Phaser.Scene {
   };
   private updatePlacementGhost(x: number, y: number) {
     if (!this.placementGhost || !this.placementKind) return;
-    const base = this.placementGhost.getAt(0) as Phaser.GameObjects.Image;
+    const base = this.placementGhost.getAt(1) as Phaser.GameObjects.Image;
     const placement = gameStore.canPlace(this.placementKind, x, y);
     base.setTint(placement.ok ? BUILDINGS[this.placementKind].color : 0xff735f).setAlpha(placement.ok ? 0.55 : 0.38);
   }
@@ -196,17 +223,22 @@ export class WorldScene extends Phaser.Scene {
     const thoughtText = crisp(this.add.text(0, 0, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#2c2417', backgroundColor: '#fff3c4', padding: { x: 7, y: 4 }, align: 'center' })).setOrigin(0.5);
     const thought = this.add.container(0, -69, [thoughtTail, thoughtText]).setVisible(false);
     const container = this.add.container(creature.x, creature.y, [shadow, actor, label, thought]).setSize(82, 110).setDepth(10).setInteractive({ useHandCursor: true });
-    const view: CreatureView = { container, actor, shadow, aura, selection, body, eyes, status, label, thought, thoughtText, lastAlive: creature.alive, visualSignature: '' };
+    const view: CreatureView = { container, actor, shadow, aura, selection, body, eyes, status, label, thought, thoughtText, lastAlive: creature.alive, visualSignature: '', lastName: creature.name };
     container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (pointer.getDistance() < 8) {
         const current = this.state.creatures.find((c) => c.id === creature.id); if (!current) return;
         this.selectedId = creature.id;
+        this.audioUnlocked = true;
+        if ((this.voiceCooldownUntil.get(creature.id) ?? 0) > this.time.now) { this.game.events.emit('creature-selected', current); return; }
         const variant = (this.voiceClickCount.get(creature.id) ?? 0) + 1; this.voiceClickCount.set(creature.id, variant);
-        const voice = creatureVocalization(current, variant);
+        const context: VoiceContext = this.returnGreetingPending ? 'return' : 'click'; this.returnGreetingPending = false;
+        const voice = contextualVocalization(current, variant, context, this.state.livingWorld.weather === 'storm' && current.personality.resilience < 0.55);
         this.vocalBubbleText.set(creature.id, voice.text); this.vocalBubbleUntil.set(creature.id, this.time.now + 1900);
-        this.playCreatureVoice(current, voice.mood, variant);
+        this.voiceCooldownUntil.set(creature.id, this.time.now + 850); this.playCreatureVoice(current, voice.mood, variant, context);
         this.tweens.killTweensOf(view.actor); this.tweens.add({ targets: view.actor, y: -9, scaleX: 1.08, scaleY: 0.94, duration: 105, yoyo: true, ease: 'Sine.easeOut' });
         this.syncState(this.state); this.game.events.emit('creature-selected', current);
+        const answer = this.state.creatures.filter((candidate) => candidate.alive && candidate.id !== current.id && Math.hypot(candidate.x - current.x, candidate.y - current.y) < 240).sort((a, b) => (b.bonds[current.id] ?? 0) - (a.bonds[current.id] ?? 0))[0];
+        if (answer && (answer.bonds[current.id] ?? 0) > 18) this.time.delayedCall(280, () => this.voiceCreature(answer, 'answer'));
       }
     });
     return view;
@@ -224,13 +256,16 @@ export class WorldScene extends Phaser.Scene {
     if (creature.task === 'sleep') return this.state.buildings.some((building) => building.kind === 'nest') ? 'Finding somewhere warm' : 'I need a Warm Archive';
     if (creature.task === 'heal') return 'Searching for treatment';
     if (creature.task === 'work') return 'Gathering alloy';
+    if (creature.task === 'construct') return 'Carrying materials to construction';
+    if (creature.task === 'maintain') return 'Repairing a worn facility';
+    if (creature.task === 'argue') return `Arguing with ${partner?.name ?? 'someone'}`;
     const dominant = personalityLabels(creature.personality, 1)[0];
     return dominant === 'CURIOUS' ? 'What lies beyond the trees?' : dominant === 'WARM' ? 'Is anyone lonely?' : dominant === 'SOCIAL' ? 'I hope someone visits' : dominant === 'STEADY' ? 'One task at a time' : 'I can endure this';
   }
   private updateThought(view: CreatureView, creature: CreatureState) {
     const vocalizing = (this.vocalBubbleUntil.get(creature.id) ?? 0) > this.time.now;
     if (vocalizing) {
-      view.thought.setVisible(creature.alive);
+      view.thought.setVisible(creature.alive && this.state.livingWorld.settings.subtitles);
       view.thoughtText.setText(this.vocalBubbleText.get(creature.id) ?? 'Hey!');
       return;
     }
@@ -332,12 +367,16 @@ export class WorldScene extends Phaser.Scene {
     }
     const core = this.add.rectangle(0, 3, 7, 7, def.color, 0.95).setBlendMode(Phaser.BlendModes.ADD);
     const glyph = crisp(this.add.text(33, -24, def.glyph, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: Phaser.Display.Color.IntegerToColor(def.color).rgba, backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
+    if (building.constructing) { art.fillStyle(0xf7bd62, 0.95).fillRect(-44, -36, 88 * building.constructionProgress / 100, 5); }
     if (building.level >= 2) art.fillStyle(def.color, 0.9).fillRect(-36, -38, 9, 9).fillRect(27, -38, 9, 9).fillStyle(0xfff0ba, 0.9).fillRect(-33, -35, 3, 3).fillRect(30, -35, 3, 3);
     const level = crisp(this.add.text(-34, -27, building.level >= 2 ? 'Ⅱ' : 'Ⅰ', { fontFamily: DISPLAY_FONT, fontSize: '11px', color: '#fff0ba', backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
-    const name = crisp(this.add.text(0, 50, buildingDisplayName(building).toUpperCase(), { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#fff0ba', backgroundColor: '#382918ee', padding: { x: 7, y: 4 } })).setOrigin(0.5);
+    const name = crisp(this.add.text(0, 50, `${buildingDisplayName(building).toUpperCase()}${building.constructing ? ` ${Math.floor(building.constructionProgress)}%` : ''}`, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#fff0ba', backgroundColor: '#382918ee', padding: { x: 7, y: 4 } })).setOrigin(0.5);
     const container = this.add.container(building.x, building.y, [shadow, halo, art, core, glyph, level, name]).setDepth(7).setSize(120, 104).setInteractive({ useHandCursor: true }).setData('level', building.level);
     container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.getDistance() < 8 && !this.placementKind) this.game.events.emit('building-selected', this.state.buildings.find((candidate) => candidate.id === building.id));
+      if (pointer.getDistance() < 8 && !this.placementKind) {
+        this.audioUnlocked = true; this.soundPulse(160 + (Object.keys(BUILDINGS).indexOf(building.kind) + 1) * 55, 260);
+        this.game.events.emit('building-selected', this.state.buildings.find((candidate) => candidate.id === building.id));
+      }
     });
     this.tweens.add({ targets: [core, halo], alpha: { from: 0.35, to: 0.9 }, scale: { from: 0.88, to: 1.12 }, duration: 1200 + (building.id.charCodeAt(1) % 5) * 110, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     return container;
@@ -351,15 +390,19 @@ export class WorldScene extends Phaser.Scene {
     state.creatures.forEach((creature) => {
       let view = this.views.get(creature.id);
       if (!view) { view = this.createCreatureView(creature); this.views.set(creature.id, view); }
-      if (view.lastAlive && !creature.alive) { this.cameras.main.shake(400, 0.006); this.game.events.emit('glitch', 0.9); }
+      if (view.lastAlive && !creature.alive) { if (state.livingWorld.settings.screenShake) this.cameras.main.shake(400, 0.006); this.game.events.emit('glitch', state.livingWorld.settings.reducedMotion ? 0.25 : 0.9); }
+      if (view.lastName !== creature.name) { view.lastName = creature.name; this.voiceCreature(creature, 'rename'); }
       view.lastAlive = creature.alive;
       this.drawCreature(view, creature);
     });
     state.buildings.forEach((building) => {
       const existing = this.buildingViews.get(building.id);
-      if (existing && existing.getData('level') !== building.level) { existing.destroy(); this.buildingViews.delete(building.id); }
+      const signature = `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}`;
+      if (existing && existing.getData('signature') !== signature) { existing.destroy(); this.buildingViews.delete(building.id); }
       if (!this.buildingViews.has(building.id)) this.buildingViews.set(building.id, this.createBuildingView(building));
     });
+    this.buildingViews.forEach((container, id) => { const building = state.buildings.find((item) => item.id === id); if (building) container.setData('signature', `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}`); });
+    this.drawPaths(state);
     this.drawPollution(state);
   }
   private drawRelationships() {
@@ -380,6 +423,18 @@ export class WorldScene extends Phaser.Scene {
       }
     }
   }
+  private drawPaths(state: WorldState) {
+    const signature = state.buildings.map((building) => `${building.id}:${Math.round(building.x)}:${Math.round(building.y)}:${building.active}`).join('|');
+    if (signature === this.buildingSignature) return; this.buildingSignature = signature; this.pathGraphics.clear();
+    const connected = state.buildings.filter((building) => building.active);
+    connected.forEach((building, index) => {
+      let nearest: BuildingState | undefined; let distance = 390;
+      connected.forEach((candidate, candidateIndex) => { if (candidateIndex >= index || candidate.id === building.id) return; const next = Math.hypot(candidate.x - building.x, candidate.y - building.y); if (next < distance) { distance = next; nearest = candidate; } });
+      if (!nearest) return;
+      this.pathGraphics.lineStyle(18, 0x5b5630, 0.24).lineBetween(building.x, building.y + 55, nearest.x, nearest.y + 55);
+      this.pathGraphics.lineStyle(4, 0xb6a566, 0.18).lineBetween(building.x, building.y + 55, nearest.x, nearest.y + 55);
+    });
+  }
   private drawPollution(state: WorldState) {
     const signature = state.pollution.map((value) => Math.floor(value / 3)).join(',');
     if (signature === this.pollutionSignature) return;
@@ -399,38 +454,87 @@ export class WorldScene extends Phaser.Scene {
   }
   private soundPulse(frequency: number, duration: number) {
     try {
+      const settings = this.state.livingWorld.settings; if (settings.muted || settings.ambienceVolume <= 0) return;
       const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const context = this.audioContext ?? new AudioContextClass(); this.audioContext = context;
       if (context.state === 'suspended') void context.resume();
       const oscillator = context.createOscillator(); const gain = context.createGain();
       oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(frequency, context.currentTime); oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.35, context.currentTime + duration / 1000);
-      gain.gain.setValueAtTime(0.055, context.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + duration / 1000);
+      gain.gain.setValueAtTime(0.055 * settings.ambienceVolume, context.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + duration / 1000);
       oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + duration / 1000);
     } catch { /* audio is optional */ }
   }
-  private playCreatureVoice(creature: CreatureState, mood: CreatureMood, variant: number) {
+  private voiceCreature(creature: CreatureState, context: VoiceContext) {
+    if (!creature.alive || (this.voiceCooldownUntil.get(creature.id) ?? 0) > this.time.now) return;
+    const variant = (this.voiceClickCount.get(creature.id) ?? 0) + 1; this.voiceClickCount.set(creature.id, variant);
+    const voice = contextualVocalization(creature, variant, context, this.state.livingWorld.weather === 'storm' && creature.personality.resilience < 0.55);
+    this.vocalBubbleText.set(creature.id, voice.text); this.vocalBubbleUntil.set(creature.id, this.time.now + (context === 'social' ? 1100 : 1650)); this.voiceCooldownUntil.set(creature.id, this.time.now + 1200);
+    this.playCreatureVoice(creature, voice.mood, variant, context);
+  }
+  private playCreatureVoice(creature: CreatureState, mood: CreatureMood, variant: number, voiceContext: VoiceContext = 'click') {
     try {
+      const settings = this.state.livingWorld.settings; if (settings.muted || settings.voiceVolume <= 0) return;
       const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const context = this.audioContext ?? new AudioContextClass(); this.audioContext = context;
       if (context.state === 'suspended') void context.resume();
       const base = voicePitch(creature) * (mood === 'tired' ? 0.76 : mood === 'unwell' ? 0.82 : mood === 'bright' ? 1.08 : 1);
       const syllables = mood === 'tired' || mood === 'unwell' ? 2 : 3;
-      const output = context.createGain(); output.gain.setValueAtTime(0.0001, context.currentTime); output.connect(context.destination);
+      const output = context.createGain(); output.gain.setValueAtTime(0.0001, context.currentTime);
+      const panner = typeof context.createStereoPanner === 'function' ? context.createStereoPanner() : undefined;
+      if (panner) { panner.pan.value = Phaser.Math.Clamp((creature.x - this.cameras.main.worldView.centerX) / Math.max(300, this.cameras.main.worldView.width / 2), -0.85, 0.85); output.connect(panner).connect(context.destination); }
+      else output.connect(context.destination);
       for (let index = 0; index < syllables; index++) {
         const start = context.currentTime + index * 0.105;
         const duration = 0.09 + (variant + index) % 3 * 0.018;
         const direction = mood === 'lonely' || mood === 'hungry' ? -1 : index % 2 === 0 ? 1 : -0.4;
         const pitch = base * (1 + ((variant * 3 + index * 2) % 7 - 3) * 0.035);
         const oscillator = context.createOscillator(); const formant = context.createBiquadFilter(); const envelope = context.createGain();
-        oscillator.type = index % 2 === 0 ? 'triangle' : 'sine';
+        oscillator.type = creature.voiceStyle === 'raspy' ? 'sawtooth' : creature.voiceStyle === 'whispery' ? 'sine' : index % 2 === 0 ? 'triangle' : 'sine';
         oscillator.frequency.setValueAtTime(pitch, start); oscillator.frequency.exponentialRampToValueAtTime(Math.max(120, pitch * (1 + direction * 0.18)), start + duration);
         formant.type = 'bandpass'; formant.frequency.value = 850 + creature.personality.curiosity * 500; formant.Q.value = 1.2;
         envelope.gain.setValueAtTime(0.0001, start); envelope.gain.exponentialRampToValueAtTime(0.16, start + 0.012); envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
         oscillator.connect(formant).connect(envelope).connect(output); oscillator.start(start); oscillator.stop(start + duration + 0.01);
       }
-      output.gain.exponentialRampToValueAtTime(0.055, context.currentTime + 0.015);
+      const contextGain = voiceContext === 'social' || voiceContext === 'sleep' ? 0.032 : voiceContext === 'critical' ? 0.07 : 0.055;
+      output.gain.exponentialRampToValueAtTime(contextGain * settings.voiceVolume, context.currentTime + 0.015);
       output.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + syllables * 0.105 + 0.12);
     } catch { /* audio is optional */ }
+  }
+  private togglePhotoMode() {
+    this.photoMode = !this.photoMode;
+    const ui = this.scene.get('UIScene'); if (this.photoMode) ui.scene.sleep(); else ui.scene.wake();
+    this.game.events.emit('toast', this.photoMode ? 'Photo mode · press P to restore interface' : 'Interface restored');
+  }
+  private updateAtmosphere(time: number) {
+    const living = this.state.livingWorld; const dayLight = Math.max(0, Math.sin(living.dayTime * Math.PI)); const night = 1 - dayLight;
+    this.dayOverlay.setFillStyle(living.season === 'frostquiet' ? 0x152949 : living.season === 'amberfall' ? 0x3a1d16 : 0x08152a, night * 0.48);
+    this.weatherGraphics.clear();
+    if (living.settings.lowPower || living.settings.quality === 'low') return;
+    const count = living.weather === 'storm' ? 70 : living.weather === 'rain' ? 46 : living.weather === 'mist' ? 20 : living.weather === 'wind' ? 18 : 0;
+    for (let index = 0; index < count; index++) {
+      const x = (index * 97 + time * (living.weather === 'wind' ? 0.045 : 0.018)) % WORLD_WIDTH;
+      const y = (index * 53 + time * 0.09) % WORLD_HEIGHT;
+      if (living.weather === 'rain' || living.weather === 'storm') this.weatherGraphics.lineStyle(2, 0x9fe9ff, living.weather === 'storm' ? 0.42 : 0.28).lineBetween(x, y, x - 5, y + 16);
+      else if (living.weather === 'mist') this.weatherGraphics.fillStyle(0xd8fff4, 0.035).fillCircle(x, y, 38);
+      else this.weatherGraphics.fillStyle(0xf0ca70, 0.24).fillRect(x, y, 5, 2);
+    }
+  }
+  private updateAmbientVoices(time: number) {
+    if (!this.audioUnlocked || this.state.livingWorld.settings.muted) return;
+    if (time - this.lastAmbienceAt > (this.state.livingWorld.settings.lowPower ? 18000 : 9000)) {
+      this.lastAmbienceAt = time;
+      const night = this.state.livingWorld.dayTime < 0.18 || this.state.livingWorld.dayTime > 0.82;
+      const danger = this.state.livingWorld.weather === 'storm' || this.state.creatures.some((creature) => creature.alive && creature.needs.health < 25);
+      this.soundPulse(danger ? 105 : night ? 175 : 235, danger ? 950 : 620);
+    }
+    if (time - this.lastAmbientVoiceAt < (this.state.livingWorld.settings.lowPower ? 12000 : 5200)) return;
+    const visible = this.state.creatures.filter((creature) => creature.alive && this.views.get(creature.id)?.container.visible);
+    const critical = visible.find((creature) => Math.min(...Object.values(creature.needs)) < 18);
+    const social = visible.find((creature) => ['socialize', 'comfort'].includes(creature.task) && creature.socialTimer > 0);
+    const sleeper = visible.find((creature) => creature.task === 'sleep' && creature.isBeingServed);
+    const player = visible.find((creature) => creature.task === 'play' && creature.isBeingServed);
+    const speaker = critical ?? social ?? sleeper ?? player; if (!speaker) return;
+    this.lastAmbientVoiceAt = time; this.voiceCreature(speaker, critical ? 'critical' : social ? 'social' : sleeper ? 'sleep' : 'play');
   }
   update(time: number, delta: number) {
     const smoothing = 1 - Math.exp(-Math.min(delta, 50) * 0.012);
@@ -440,12 +544,23 @@ export class WorldScene extends Phaser.Scene {
       mote.node.y = mote.originY + Math.cos(time * 0.00038 * mote.speed + mote.phase) * 9;
       mote.node.alpha = 0.13 + (Math.sin(time * 0.0012 + mote.phase) + 1) * 0.09;
     });
+    this.updateAtmosphere(time); this.updateAmbientVoices(time);
+    if (!this.state.livingWorld.settings.lowPower && time - this.lastFootprintAt > 180) {
+      const walkers = this.state.creatures.filter((creature) => creature.alive && Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y) > 18 && this.views.get(creature.id)?.container.visible);
+      const walker = walkers[this.footprintCursor % Math.max(1, walkers.length)];
+      if (walker) {
+        const footprint = this.footprintPool[this.footprintCursor++ % this.footprintPool.length]; this.lastFootprintAt = time;
+        footprint.setPosition(walker.x, walker.y + 25).setAlpha(0.28).setAngle(this.footprintCursor % 2 ? 12 : -12);
+        this.tweens.killTweensOf(footprint); this.tweens.add({ targets: footprint, alpha: 0, duration: 900 });
+      }
+    }
     this.state.creatures.forEach((creature) => {
       const view = this.views.get(creature.id); if (!view) return;
       const dx = creature.x - view.container.x; const dy = creature.y - view.container.y;
       view.container.x += dx * smoothing; view.container.y += dy * smoothing;
       const phase = Number(creature.id.replace(/\D/g, '')) * 0.71;
-      view.actor.y = creature.alive ? Math.sin(time * 0.004 + phase) * 2.5 : 0;
+      const motionScale = this.state.livingWorld.settings.reducedMotion ? 0.25 : 1;
+      view.actor.y = creature.alive ? Math.sin(time * 0.004 + phase) * 2.5 * motionScale : 0;
       view.actor.rotation = Phaser.Math.Linear(view.actor.rotation, creature.alive ? Phaser.Math.Clamp(dx * 0.002, -0.11, 0.11) : 0, smoothing * 0.5);
       const pulse = 1 + Math.sin(time * 0.003 + phase) * 0.055;
       view.aura.setScale(pulse); view.shadow.setScale(1 - (pulse - 1) * 1.5, 1);
@@ -465,6 +580,7 @@ export class WorldScene extends Phaser.Scene {
     this.game.events.off('care-effect', this.playCareEffect, this);
     this.scale.off('resize', this.handleResize, this);
     this.input.keyboard?.off('keydown-ESC');
+    this.input.keyboard?.off('keydown-P'); this.input.keyboard?.off('keydown-SPACE'); this.input.keyboard?.off('keydown-ONE'); this.input.keyboard?.off('keydown-TWO'); this.input.keyboard?.off('keydown-THREE'); this.input.keyboard?.off('keydown-G'); this.input.keyboard?.off('keydown-U');
     this.cancelPlacement(false);
     if (this.audioContext && this.audioContext.state !== 'closed') void this.audioContext.close();
     this.audioContext = undefined;
