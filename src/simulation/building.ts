@@ -1,4 +1,5 @@
 import type { BuildingKind, BuildingState, Resources } from './worldState';
+import { isHabitatObstacle } from './navigation';
 
 export interface BuildingDefinition {
   kind: BuildingKind;
@@ -36,6 +37,7 @@ export function validateBuildingPlacement(buildings: BuildingState[], x: number,
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 60 || x > 1540 || y < 80 || y > 930) {
     return { ok: false, reason: 'Place it inside the habitat boundary' };
   }
+  if (isHabitatObstacle({ x, y }, 54)) return { ok: false, reason: 'Keep structures clear of water and ancient stone' };
   if (buildings.some((building) => Math.hypot(building.x - x, building.y - y) < 112)) {
     return { ok: false, reason: 'Leave more room between structures' };
   }

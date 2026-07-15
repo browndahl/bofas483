@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import objectives from '../data/objectives.json';
 import { BUILDINGS } from '../simulation/building';
+import { personalityLabels } from '../simulation/personality';
 import type { CreatureState, WorldState } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
 import { saveService } from '../services/saveService';
@@ -22,6 +23,7 @@ export class UIScene extends Phaser.Scene {
   private creaturePanel!: Phaser.GameObjects.Container;
   private creatureName!: Phaser.GameObjects.Text;
   private creatureStatus!: Phaser.GameObjects.Text;
+  private creaturePersonality!: Phaser.GameObjects.Text;
   private meters = new Map<string, MeterView>();
   private careButtons: Phaser.GameObjects.Container[] = [];
   private buildButton!: Phaser.GameObjects.Container;
@@ -63,7 +65,8 @@ export class UIScene extends Phaser.Scene {
     this.creaturePanel.add(panel(this, 0, 0, 280, 294));
     this.creatureName = crisp(this.add.text(-120, -124, 'PIP-01', { fontFamily: DISPLAY_FONT, fontSize: '16px', color: '#fff0a8', letterSpacing: 0.7 }));
     this.creatureStatus = crisp(this.add.text(120, -122, 'ALIVE', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#d8c69a' })).setOrigin(1, 0);
-    this.creaturePanel.add([this.creatureName, this.creatureStatus]);
+    this.creaturePersonality = crisp(this.add.text(-120, -105, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#90c9b0', letterSpacing: 0.6 }));
+    this.creaturePanel.add([this.creatureName, this.creatureStatus, this.creaturePersonality]);
     const meterDefs = [['hunger', 'NOURISHMENT', 0xf7bd62], ['hygiene', 'CLARITY', 0x65c7ff], ['happiness', 'RESONANCE', 0xbf78ff], ['health', 'INTEGRITY', 0x7af6bd], ['energy', 'CHARGE', 0xff8fcf]] as const;
     meterDefs.forEach(([key, label, color], index) => {
       const view = meter(this, -120, -88 + index * 31, 240, label, color);
@@ -139,6 +142,9 @@ export class UIScene extends Phaser.Scene {
   }
   private renderCreature(creature: CreatureState) {
     this.creatureName.setText(creature.name); this.creatureStatus.setText(creature.alive ? `${creature.task.toUpperCase()} · GEN ${creature.generation}` : 'SILENT').setColor(creature.alive ? '#678779' : '#ff735f');
+    const strongestBond = Object.entries(creature.bonds).sort((a, b) => b[1] - a[1])[0];
+    const bondName = strongestBond ? this.state.creatures.find((candidate) => candidate.id === strongestBond[0])?.name : undefined;
+    this.creaturePersonality.setText(`${personalityLabels(creature.personality).join(' · ')}${bondName ? `  /  CLOSE TO ${bondName}` : ''}`);
     Object.entries(creature.needs).forEach(([key, value]) => {
       const view = this.meters.get(key); if (view) view.target = view.width * value / 100;
     });

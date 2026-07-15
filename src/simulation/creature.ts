@@ -1,5 +1,5 @@
 import type { BuildingState, CreatureState, NeedKey, TaskType, WorldState } from './worldState';
-import { makeCreature } from './worldState';
+import { connectParentAndChild, makeCreature } from './worldState';
 
 export const NEED_DECAY: Record<NeedKey, number> = {
   hunger: 0.65,
@@ -15,10 +15,12 @@ export function decayNeeds(creature: CreatureState, seconds: number, pollution =
   if (!creature.alive) return creature;
   const needs = { ...creature.needs };
   (Object.keys(NEED_DECAY) as NeedKey[]).forEach((key) => {
-    needs[key] = clamp(needs[key] - NEED_DECAY[key] * seconds);
+    const personalityFactor = key === 'happiness' ? 1.12 - creature.personality.resilience * 0.24 : 1;
+    needs[key] = clamp(needs[key] - NEED_DECAY[key] * personalityFactor * seconds);
   });
   const distress = [needs.hunger, needs.hygiene, needs.happiness, needs.energy].filter((n) => n < 15).length;
-  needs.health = clamp(needs.health - distress * 0.75 * seconds - Math.max(0, pollution - 38) * 0.015 * seconds);
+  const resilience = 1.08 - creature.personality.resilience * 0.2;
+  needs.health = clamp(needs.health - distress * 0.75 * resilience * seconds - Math.max(0, pollution - 38) * 0.015 * resilience * seconds);
   return { ...creature, needs, exposure: clamp(creature.exposure + pollution * 0.008 * seconds), age: creature.age + seconds };
 }
 
@@ -50,5 +52,7 @@ export function divideCreature(parent: CreatureState, world: WorldState): Creatu
   parent.reproduction = 0;
   parent.needs.energy = Math.max(30, parent.needs.energy - 30);
   parent.needs.hunger = Math.max(35, parent.needs.hunger - 22);
-  return makeCreature(id, parent.x + 26, parent.y + 10, parent.generation + 1);
+  const child = makeCreature(id, parent.x + 26, parent.y + 10, parent.generation + 1, parent.personality);
+  connectParentAndChild(parent, child);
+  return child;
 }

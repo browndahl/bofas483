@@ -7,7 +7,7 @@ import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
 const PAGES = [
   {
     title: 'START HERE',
-    body: 'YOUR PURPOSE\nKeep the Luma alive while their colony grows. Their needs fall continuously—even while you are watching other screens in the game.\n\nTHE CORE LOOP\n1. Select a Luma to inspect its five needs.\n2. Use FEED, WASH, and PLAY for immediate care.\n3. Build facilities so the colony can care for itself.\n4. Keep needs high to enable division and grow the population.\n5. Your choices shape the hidden humanity audit.\n\nRESOURCES\nGLOW pays for most construction.\nALLOY unlocks advanced automation.\nThe Deep Taker produces both, but pollutes its surroundings.'
+    body: 'YOUR PURPOSE\nKeep the Luma alive while their colony grows. Their needs fall continuously—even while you are watching other screens in the game.\n\nLIVING INDIVIDUALS\nEvery Luma inherits a persistent personality. WARM Luma comfort distress, SOCIAL Luma seek company, CURIOUS Luma explore, STEADY Luma work diligently, and BRAVE Luma withstand pressure. Shared time forms lasting bonds.\n\nTHE CORE LOOP\n1. Select a Luma to inspect its needs and personality.\n2. Use FEED, WASH, and PLAY for immediate care.\n3. Build facilities so the colony can care for itself.\n4. Keep needs high to enable division and grow the population.\n5. Your choices shape the hidden humanity audit.\n\nRESOURCES\nGLOW pays for construction. ALLOY unlocks advanced automation. The Deep Taker produces both, but pollutes.'
   },
   {
     title: 'LUMA NEEDS',
@@ -23,7 +23,7 @@ const PAGES = [
   },
   {
     title: 'CONTROLS & SIGNALS',
-    body: 'SELECT\nClick or tap a Luma to make it the active care target. Its ring and name brighten.\n\nMOVE THE HABITAT\nDrag empty ground to pan. Use the mouse wheel or pinch with two fingers to zoom. Zoom stays centred beneath your pointer.\n\nBUILD\nChoose a facility, then click or tap a valid location inside the habitat. Red means blocked. Structures need clear space. Press Escape or right-click to cancel placement.\n\nSTATUS SIGNALS\n! hungry   ≋ dirty   z tired   · unhappy   ☣ sick\nSILENT means the Luma has died and cannot be restored.\n\nSAVE\nLocal progress saves automatically every 15 seconds. SAVE also attempts a cloud save when identity services are connected.\n\nAUDIT\nShows what the habitat currently infers about your decisions. IDENTITY connects cloud saving.'
+    body: 'SELECT\nClick or tap a Luma to make it the active care target. Its ring and name brighten. Thought bubbles explain current intent. Pink links show friendship; green links show comfort.\n\nMOVE THE HABITAT\nDrag empty ground to pan. Use the mouse wheel or pinch with two fingers to zoom. Luma route around structures, water, stone, and each other.\n\nBUILD\nChoose a facility, then click or tap a valid location. Red means blocked. Structures need clear ground and spacing. Press Escape or right-click to cancel.\n\nSTATUS SIGNALS\n! hungry   ≋ dirty   z tired   · unhappy   ☣ sick   ♡ social   + comforting\nSILENT means the Luma has died and cannot be restored.\n\nSAVE\nLocal progress saves automatically every 15 seconds. SAVE also attempts a cloud save when identity services are connected.\n\nAUDIT\nShows what the habitat currently infers about your decisions. IDENTITY connects cloud saving.'
   }
 ] as const;
 

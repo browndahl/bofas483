@@ -1,14 +1,19 @@
 import { z } from 'zod';
+import { createCreaturePersonality } from './personality';
 import type { WorldState } from './worldState';
 import { MAX_EVENT_HISTORY } from './worldState';
 
 const finite = z.number().finite();
+const vec2 = z.object({ x: finite, y: finite });
 const needs = z.object({ hunger: finite, hygiene: finite, happiness: finite, health: finite, energy: finite });
+const creaturePersonality = z.object({ sociability: finite.min(0).max(1), curiosity: finite.min(0).max(1), diligence: finite.min(0).max(1), empathy: finite.min(0).max(1), resilience: finite.min(0).max(1) });
 const creature = z.object({
   id: z.string().min(1).max(40), name: z.string().min(1).max(80), x: finite, y: finite,
-  target: z.object({ x: finite, y: finite }), destinationBuildingId: z.string().max(40).optional(), needs,
-  task: z.enum(['wander', 'eat', 'bathe', 'play', 'sleep', 'work', 'heal', 'dead']), age: finite,
-  exposure: finite, reproduction: finite, alive: z.boolean(), deathAge: finite.optional(), generation: z.number().int().min(0), hue: finite
+  target: vec2, destinationBuildingId: z.string().max(40).optional(), destinationCreatureId: z.string().max(40).optional(),
+  navigationPath: z.array(vec2).max(128).optional(), navigationTarget: vec2.optional(), needs,
+  task: z.enum(['wander', 'eat', 'bathe', 'play', 'sleep', 'work', 'heal', 'socialize', 'comfort', 'dead']), age: finite,
+  exposure: finite, reproduction: finite, alive: z.boolean(), deathAge: finite.optional(), generation: z.number().int().min(0), hue: finite,
+  personality: creaturePersonality.optional(), bonds: z.record(finite.min(0).max(100)).optional(), socialCooldown: finite.nonnegative().optional(), socialTimer: finite.nonnegative().optional()
 });
 const building = z.object({
   id: z.string().min(1).max(40), kind: z.enum(['nutrient-bed', 'wash-pool', 'resonance-garden', 'nest', 'extractor', 'clinic']),
@@ -34,6 +39,13 @@ const schema = z.object({
 export function parseWorldState(value: unknown): WorldState | null {
   const result = schema.safeParse(value);
   if (!result.success) return null;
+  result.data.creatures.forEach((creatureState) => {
+    creatureState.navigationPath ??= [];
+    creatureState.personality ??= createCreaturePersonality(creatureState.id, creatureState.generation);
+    creatureState.bonds = Object.fromEntries(Object.entries(creatureState.bonds ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 8));
+    creatureState.socialCooldown ??= 0;
+    creatureState.socialTimer ??= 0;
+  });
   const world = result.data as WorldState;
   if (world.events.length > MAX_EVENT_HISTORY) world.events = world.events.slice(-MAX_EVENT_HISTORY);
   return world;

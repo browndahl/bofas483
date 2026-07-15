@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { BUILDINGS } from '../simulation/building';
+import { personalityLabels } from '../simulation/personality';
 import type { BuildingKind, BuildingState, CreatureState, WorldState } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
 import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
@@ -14,6 +15,8 @@ interface CreatureView {
   eyes: Phaser.GameObjects.Graphics;
   status: Phaser.GameObjects.Text;
   label: Phaser.GameObjects.Text;
+  thought: Phaser.GameObjects.Container;
+  thoughtText: Phaser.GameObjects.Text;
   lastAlive: boolean;
   visualSignature: string;
 }
@@ -25,8 +28,10 @@ const WORLD_HEIGHT = 1000;
 
 export class WorldScene extends Phaser.Scene {
   private views = new Map<string, CreatureView>();
+  private creaturesById = new Map<string, CreatureState>();
   private buildingViews = new Map<string, Phaser.GameObjects.Container>();
   private pollutionGraphics!: Phaser.GameObjects.Graphics;
+  private relationshipGraphics!: Phaser.GameObjects.Graphics;
   private selectedId = 'c1';
   private unsubscribe?: () => void;
   private state = gameStore.get();
@@ -46,6 +51,7 @@ export class WorldScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT).setZoom(this.baseZoom()).centerOn(800, 500);
     this.drawHabitat();
     this.pollutionGraphics = this.add.graphics().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
+    this.relationshipGraphics = this.add.graphics().setDepth(8).setBlendMode(Phaser.BlendModes.ADD);
     this.configureInput();
     for (let i = 0; i < 24; i++) this.effectPool.push(this.add.rectangle(0, 0, 5, 5, 0x7af6bd, 0).setDepth(18));
     this.unsubscribe = gameStore.subscribe((state) => { this.state = state; this.syncState(state); });
@@ -177,21 +183,48 @@ export class WorldScene extends Phaser.Scene {
     const status = crisp(this.add.text(29, -34, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: '#071410', backgroundColor: '#f7bd62', padding: { x: 4, y: 2 } })).setOrigin(0.5).setVisible(false);
     const actor = this.add.container(0, 0, [aura, selection, body, eyes, status]);
     const label = crisp(this.add.text(0, 45, creature.name, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#fff1ba', backgroundColor: '#352816e8', padding: { x: 7, y: 4 } })).setOrigin(0.5).setStroke('#20170d', 1);
-    const container = this.add.container(creature.x, creature.y, [shadow, actor, label]).setSize(82, 98).setDepth(10).setInteractive({ useHandCursor: true });
+    const thoughtTail = this.add.triangle(0, 16, 0, 0, 10, 0, 5, 7, 0xfff3c4, 0.96).setOrigin(0.5, 0);
+    const thoughtText = crisp(this.add.text(0, 0, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#2c2417', backgroundColor: '#fff3c4', padding: { x: 7, y: 4 }, align: 'center' })).setOrigin(0.5);
+    const thought = this.add.container(0, -69, [thoughtTail, thoughtText]).setVisible(false);
+    const container = this.add.container(creature.x, creature.y, [shadow, actor, label, thought]).setSize(82, 110).setDepth(10).setInteractive({ useHandCursor: true });
     container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (pointer.getDistance() < 8) { this.selectedId = creature.id; this.syncState(this.state); this.game.events.emit('creature-selected', this.state.creatures.find((c) => c.id === creature.id)); this.soundPulse(520, 80); }
     });
-    return { container, actor, shadow, aura, selection, body, eyes, status, label, lastAlive: creature.alive, visualSignature: '' };
+    return { container, actor, shadow, aura, selection, body, eyes, status, label, thought, thoughtText, lastAlive: creature.alive, visualSignature: '' };
+  }
+  private thoughtFor(creature: CreatureState): string {
+    if (!creature.alive) return '…';
+    const partner = creature.destinationCreatureId ? this.creaturesById.get(creature.destinationCreatureId) : undefined;
+    if (creature.task === 'socialize') return creature.socialTimer > 0 ? `Sharing light with ${partner?.name ?? 'a friend'} ♡` : `Finding ${partner?.name ?? 'company'} ♡`;
+    if (creature.task === 'comfort') return `Helping ${partner?.name ?? 'someone'} +`;
+    if (creature.task === 'eat') return this.state.buildings.some((building) => building.kind === 'nutrient-bed') ? 'Seeking nourishment' : 'I need a Dew Loom';
+    if (creature.task === 'bathe') return this.state.buildings.some((building) => building.kind === 'wash-pool') ? 'Looking for mist' : 'I need a Mist Basin';
+    if (creature.task === 'play') return this.state.buildings.some((building) => building.kind === 'resonance-garden') ? 'Seeking resonance' : 'I need a Chime Grove';
+    if (creature.task === 'sleep') return this.state.buildings.some((building) => building.kind === 'nest') ? 'Finding somewhere warm' : 'I need a Warm Archive';
+    if (creature.task === 'heal') return 'Searching for treatment';
+    if (creature.task === 'work') return 'Gathering alloy';
+    const dominant = personalityLabels(creature.personality, 1)[0];
+    return dominant === 'CURIOUS' ? 'What lies beyond the trees?' : dominant === 'WARM' ? 'Is anyone lonely?' : dominant === 'SOCIAL' ? 'I hope someone visits' : dominant === 'STEADY' ? 'One task at a time' : 'I can endure this';
+  }
+  private updateThought(view: CreatureView, creature: CreatureState) {
+    const serial = Number(creature.id.replace(/\D/g, '')) || 1;
+    const urgent = Math.min(creature.needs.hunger, creature.needs.hygiene, creature.needs.happiness, creature.needs.health, creature.needs.energy) < 30;
+    const social = creature.task === 'socialize' || creature.task === 'comfort';
+    const periodic = (Math.floor(this.state.time / 7) + serial) % 7 === 0;
+    const visible = creature.id === this.selectedId || social || urgent || (periodic && this.state.creatures.length < 36);
+    view.thought.setVisible(visible && creature.alive);
+    if (visible) view.thoughtText.setText(this.thoughtFor(creature));
   }
   private drawCreature(view: CreatureView, creature: CreatureState) {
     const n = creature.needs; const sick = n.health < 48; const tired = n.energy < 25; const sad = n.happiness < 38;
     const color = creature.alive ? Phaser.Display.Color.HSVToRGB(creature.hue / 360, sick ? 0.18 : 0.5, sick ? 0.55 : 0.95).color : 0x39463f;
     const selected = creature.id === this.selectedId;
     const dirty = n.hygiene < 35; const hungry = n.hunger < 30;
-    const signature = [creature.alive, sick, tired, sad, dirty, hungry, selected].join(':');
+    const signature = [creature.alive, sick, tired, sad, dirty, hungry, selected, creature.task].join(':');
     const labelText = creature.alive ? `${creature.name}  ·  ${creature.task.toUpperCase()}` : `${creature.name}  ·  SILENT`;
     if (view.label.text !== labelText) view.label.setText(labelText);
     view.label.setColor(selected ? '#fff4a8' : '#f4e2ae');
+    this.updateThought(view, creature);
     if (view.visualSignature === signature) return;
     view.visualSignature = signature;
     const light = Phaser.Display.Color.ValueToColor(color).clone().lighten(24).color;
@@ -230,8 +263,9 @@ export class WorldScene extends Phaser.Scene {
     } else {
       view.eyes.fillStyle(0x25301f, 1).fillRect(-13, 14, 9, 3).fillRect(-10, 11, 3, 9).fillRect(4, 14, 9, 3).fillRect(7, 11, 3, 9);
     }
-    const status = !creature.alive ? '' : sick ? '☣' : hungry ? '!' : dirty ? '≋' : sad ? '·' : tired ? 'z' : '';
-    view.status.setText(status).setVisible(Boolean(status)).setBackgroundColor(sick ? '#ff735f' : hungry ? '#f7bd62' : dirty ? '#65c7ff' : '#bf78ff');
+    const status = !creature.alive ? '' : sick ? '☣' : hungry ? '!' : dirty ? '≋' : sad ? '·' : tired ? 'z' : creature.task === 'comfort' ? '+' : creature.task === 'socialize' ? '♡' : '';
+    const statusColor = sick ? '#ff735f' : hungry ? '#f7bd62' : dirty ? '#65c7ff' : creature.task === 'comfort' ? '#7af6bd' : '#bf78ff';
+    view.status.setText(status).setVisible(Boolean(status)).setBackgroundColor(statusColor);
   }
   private createBuildingView(building: BuildingState) {
     const def = BUILDINGS[building.kind];
@@ -275,6 +309,7 @@ export class WorldScene extends Phaser.Scene {
     return container;
   }
   private syncState(state: WorldState) {
+    this.creaturesById = new Map(state.creatures.map((creature) => [creature.id, creature]));
     const creatureIds = new Set(state.creatures.map((creature) => creature.id));
     this.views.forEach((view, id) => { if (!creatureIds.has(id)) { view.container.destroy(); this.views.delete(id); } });
     const buildingIds = new Set(state.buildings.map((building) => building.id));
@@ -288,6 +323,24 @@ export class WorldScene extends Phaser.Scene {
     });
     state.buildings.forEach((building) => { if (!this.buildingViews.has(building.id)) this.buildingViews.set(building.id, this.createBuildingView(building)); });
     this.drawPollution(state);
+  }
+  private drawRelationships() {
+    this.relationshipGraphics.clear();
+    const rendered = new Set<string>();
+    for (const creature of this.state.creatures) {
+      if (!creature.alive || !creature.destinationCreatureId || !['socialize', 'comfort'].includes(creature.task)) continue;
+      const partner = this.creaturesById.get(creature.destinationCreatureId);
+      const from = this.views.get(creature.id); const to = partner ? this.views.get(partner.id) : undefined;
+      if (!partner?.alive || !from || !to) continue;
+      const key = [creature.id, partner.id].sort().join(':'); if (rendered.has(key)) continue; rendered.add(key);
+      const active = creature.socialTimer > 0;
+      this.relationshipGraphics.lineStyle(active ? 3 : 2, creature.task === 'comfort' ? 0x7af6bd : 0xffa6d8, active ? 0.52 : 0.2);
+      this.relationshipGraphics.lineBetween(from.container.x, from.container.y - 4, to.container.x, to.container.y - 4);
+      if (active) {
+        const midpointX = (from.container.x + to.container.x) / 2; const midpointY = (from.container.y + to.container.y) / 2;
+        this.relationshipGraphics.fillStyle(creature.task === 'comfort' ? 0x7af6bd : 0xffa6d8, 0.8).fillCircle(midpointX, midpointY - 5, 3);
+      }
+    }
   }
   private drawPollution(state: WorldState) {
     const signature = state.pollution.map((value) => Math.floor(value / 3)).join(',');
@@ -334,10 +387,13 @@ export class WorldScene extends Phaser.Scene {
       view.actor.rotation = Phaser.Math.Linear(view.actor.rotation, creature.alive ? Phaser.Math.Clamp(dx * 0.002, -0.11, 0.11) : 0, smoothing * 0.5);
       const pulse = 1 + Math.sin(time * 0.003 + phase) * 0.055;
       view.aura.setScale(pulse); view.shadow.setScale(1 - (pulse - 1) * 1.5, 1);
+      view.thought.y = -69 + Math.sin(time * 0.0025 + phase) * 2;
+      view.thought.alpha = 0.9 + (Math.sin(time * 0.003 + phase) + 1) * 0.05;
       const inView = view.container.x > camera.worldView.left - 100 && view.container.x < camera.worldView.right + 100 && view.container.y > camera.worldView.top - 100 && view.container.y < camera.worldView.bottom + 100;
       view.container.setVisible(inView);
       view.label.setVisible(inView && ((camera.zoom > 0.68 && this.state.creatures.length < 90) || creature.id === this.selectedId));
     });
+    this.drawRelationships();
   }
   shutdown() {
     this.unsubscribe?.(); this.unsubscribe = undefined;

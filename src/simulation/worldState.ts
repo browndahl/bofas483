@@ -1,9 +1,12 @@
+import { createCreaturePersonality, setBond } from './personality';
+
 export type NeedKey = 'hunger' | 'hygiene' | 'happiness' | 'health' | 'energy';
-export type TaskType = 'wander' | 'eat' | 'bathe' | 'play' | 'sleep' | 'work' | 'heal' | 'dead';
+export type TaskType = 'wander' | 'eat' | 'bathe' | 'play' | 'sleep' | 'work' | 'heal' | 'socialize' | 'comfort' | 'dead';
 export type BuildingKind = 'nutrient-bed' | 'wash-pool' | 'resonance-garden' | 'nest' | 'extractor' | 'clinic';
 
 export interface Vec2 { x: number; y: number }
 export interface Needs { hunger: number; hygiene: number; happiness: number; health: number; energy: number }
+export interface CreaturePersonality { sociability: number; curiosity: number; diligence: number; empathy: number; resilience: number }
 export interface CreatureState {
   id: string;
   name: string;
@@ -11,6 +14,9 @@ export interface CreatureState {
   y: number;
   target: Vec2;
   destinationBuildingId?: string;
+  destinationCreatureId?: string;
+  navigationPath: Vec2[];
+  navigationTarget?: Vec2;
   needs: Needs;
   task: TaskType;
   age: number;
@@ -20,6 +26,10 @@ export interface CreatureState {
   deathAge?: number;
   generation: number;
   hue: number;
+  personality: CreaturePersonality;
+  bonds: Record<string, number>;
+  socialCooldown: number;
+  socialTimer: number;
 }
 export interface BuildingState {
   id: string;
@@ -71,7 +81,7 @@ export function appendWorldEvent(world: WorldState, event: GameEvent) {
 
 const names = ['Pip', 'Mote', 'Iri', 'Nim', 'Vela', 'Odo', 'Rua', 'Kip', 'Sola', 'Tem', 'Uma', 'Bram'];
 
-export function makeCreature(id: string, x: number, y: number, generation = 0): CreatureState {
+export function makeCreature(id: string, x: number, y: number, generation = 0, parentPersonality?: CreaturePersonality): CreatureState {
   const serial = Number(id.replace(/\D/g, '')) || 1;
   const index = serial - 1;
   return {
@@ -80,6 +90,7 @@ export function makeCreature(id: string, x: number, y: number, generation = 0): 
     x,
     y,
     target: { x, y },
+    navigationPath: [],
     needs: { hunger: 78, hygiene: 82, happiness: 74, health: 100, energy: 88 },
     task: 'wander',
     age: 0,
@@ -87,8 +98,17 @@ export function makeCreature(id: string, x: number, y: number, generation = 0): 
     reproduction: 0,
     alive: true,
     generation,
-    hue: 145 + (index * 23) % 70
+    hue: 145 + (index * 23) % 70,
+    personality: createCreaturePersonality(id, generation, parentPersonality),
+    bonds: {},
+    socialCooldown: 5 + index % 8,
+    socialTimer: 0
   };
+}
+
+export function connectParentAndChild(parent: CreatureState, child: CreatureState) {
+  setBond(parent, child.id, 36);
+  setBond(child, parent.id, 36);
 }
 
 export function createInitialWorld(seed = Date.now()): WorldState {

@@ -3,7 +3,9 @@ import { chooseTask, decayNeeds, reproductionReady } from '../src/simulation/cre
 import { findPath } from '../src/simulation/pathfinding';
 import { spreadPollution, tickWorld } from '../src/simulation/simulation';
 import { createBuilding, validateBuildingPlacement } from '../src/simulation/building';
-import { appendWorldEvent, createInitialWorld, MAX_EVENT_HISTORY } from '../src/simulation/worldState';
+import { buildNavigationPath } from '../src/simulation/navigation';
+import { createCreaturePersonality, setBond } from '../src/simulation/personality';
+import { appendWorldEvent, createInitialWorld, makeCreature, MAX_EVENT_HISTORY } from '../src/simulation/worldState';
 import { parseWorldState } from '../src/simulation/worldSchema';
 
 describe('creature simulation', () => {
@@ -36,6 +38,27 @@ describe('creature simulation', () => {
     expect(next.resources.glow).toBeCloseTo(98);
     expect(next.events.filter((event) => event.type === 'objective_complete')).toHaveLength(1);
   });
+  it('gives each Luma a stable bounded personality', () => {
+    const first = createCreaturePersonality('c12', 2); const second = createCreaturePersonality('c12', 2);
+    expect(first).toEqual(second);
+    expect(Object.values(first).every((value) => value >= 0 && value <= 1)).toBe(true);
+  });
+  it('forms bonds during social time', () => {
+    const world = createInitialWorld(1); const friend = makeCreature('c2', 540, 500);
+    world.creatures[0].x = 500; world.creatures[0].y = 500; world.creatures[0].target = { x: 500, y: 500 };
+    world.creatures.push(friend);
+    world.creatures.forEach((creature) => { creature.age = 10; creature.socialCooldown = 0; creature.needs.happiness = 65; });
+    const next = tickWorld(world, 0.2);
+    expect(next.creatures.some((creature) => creature.task === 'socialize')).toBe(true);
+    expect(next.creatures[0].bonds.c2 ?? next.creatures[1].bonds.c1).toBeGreaterThan(0);
+  });
+  it('allows empathetic Luma to comfort distress', () => {
+    const world = createInitialWorld(1); const distressed = makeCreature('c2', 540, 500);
+    world.creatures[0].x = 500; world.creatures[0].y = 500; world.creatures[0].age = 10; world.creatures[0].socialCooldown = 0; world.creatures[0].personality.empathy = 1;
+    distressed.needs.happiness = 20; world.creatures.push(distressed);
+    const next = tickWorld(world, 0.2);
+    expect(next.creatures[0].task).toBe('comfort');
+  });
 });
 
 describe('environment and navigation', () => {
@@ -51,7 +74,17 @@ describe('environment and navigation', () => {
     const building = createBuilding('nutrient-bed', 500, 500, 1);
     expect(validateBuildingPlacement([building], 550, 530).ok).toBe(false);
     expect(validateBuildingPlacement([building], 20, 500).ok).toBe(false);
-    expect(validateBuildingPlacement([building], 800, 500).ok).toBe(true);
+    expect(validateBuildingPlacement([building], 700, 650).ok).toBe(true);
+  });
+  it('routes around structures instead of crossing them', () => {
+    const blocker = createBuilding('wash-pool', 500, 500, 1);
+    const path = buildNavigationPath({ x: 300, y: 500 }, { x: 700, y: 500 }, [blocker]);
+    expect(path.length).toBeGreaterThan(1);
+    expect(path.some((point) => Math.abs(point.y - 500) > 40)).toBe(true);
+    expect(path.slice(0, -1).every((point) => Math.hypot(point.x - blocker.x, point.y - blocker.y) >= 66)).toBe(true);
+  });
+  it('rejects construction on scenic water and stone', () => {
+    expect(validateBuildingPlacement([], 170, 105).ok).toBe(false);
   });
 });
 
@@ -65,5 +98,21 @@ describe('state integrity', () => {
     for (let index = 0; index < MAX_EVENT_HISTORY + 40; index++) appendWorldEvent(world, { type: 'test', at: index, payload: {} });
     expect(world.events).toHaveLength(MAX_EVENT_HISTORY);
     expect(world.events[0].at).toBe(40);
+  });
+  it('migrates legacy creatures without personality data', () => {
+    const world = createInitialWorld(1);
+    const legacy = structuredClone(world) as unknown as { creatures: Array<Record<string, unknown>> };
+    for (const creature of legacy.creatures) {
+      delete creature.personality; delete creature.bonds; delete creature.navigationPath; delete creature.socialCooldown; delete creature.socialTimer;
+    }
+    const migrated = parseWorldState(legacy);
+    expect(migrated?.creatures[0].personality).toBeDefined();
+    expect(migrated?.creatures[0].navigationPath).toEqual([]);
+  });
+  it('keeps relationship state bounded', () => {
+    const creature = createInitialWorld(1).creatures[0];
+    for (let index = 2; index <= 14; index++) setBond(creature, `c${index}`, index);
+    expect(Object.keys(creature.bonds)).toHaveLength(8);
+    expect(Math.min(...Object.values(creature.bonds))).toBe(7);
   });
 });

@@ -2,10 +2,11 @@ export interface GridPoint { x: number; y: number }
 
 export function findPath(start: GridPoint, goal: GridPoint, blocked: Set<string>, width: number, height: number): GridPoint[] {
   const queue: GridPoint[] = [start];
+  let queueIndex = 0;
   const cameFrom = new Map<string, GridPoint | null>([[`${start.x},${start.y}`, null]]);
   const directions = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
-  while (queue.length) {
-    const current = queue.shift()!;
+  while (queueIndex < queue.length) {
+    const current = queue[queueIndex++];
     if (current.x === goal.x && current.y === goal.y) break;
     const next = directions
       .map((d) => ({ x: current.x + d.x, y: current.y + d.y }))
