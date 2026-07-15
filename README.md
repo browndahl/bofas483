@@ -25,9 +25,10 @@ npm run preview
 
 ## Architecture
 
-- Phaser renders the habitat, pooled creature views, procedural original art, synthesized interaction tones, responsive HUD, dialogue, audits, and fiction-contained glitches.
-- Typed creature/building state is independent of Phaser objects. A Web Worker advances needs, autonomous tasks, movement, exposure, reproduction, pollution, work, illness, and death every 200 ms; Phaser interpolates state deltas.
-- `SpatialGrid` supports bounded neighbor queries and pathfinding is grid-based. Rendering is capped naturally by camera/world scope; the worker keeps all agents as plain data, ready for more aggressive level-of-detail batching beyond the MVP's 250 hard cap.
+- Phaser renders an original bundled pixel-art habitat, procedural actors and structures, pooled effects, synthesized interaction tones, responsive HUD, dialogue, audits, and fiction-contained glitches.
+- Typed creature/building state is independent of Phaser objects. A Web Worker advances needs, autonomous tasks, movement, exposure, reproduction, pollution, work, illness, and death on a measured five-Hz cadence; Phaser interpolates state deltas.
+- Active buildings are grouped by kind once per simulation step and nearest-target searches are allocation-free. Rendering culls off-camera creature views and hides most labels as colony size grows. The worker keeps agents as plain data behind a 250-creature cap; the existing `SpatialGrid` and pathfinding modules are prototypes, not part of current movement.
+- Zod validates local and cloud save data before hydration. Event history is capped, objective rewards are idempotent, and legacy raw local saves remain compatible.
 - Supabase handles anonymous, email/password, and Google auth; private saves and event logs use RLS. Sensitive writes go exclusively through validated Edge Functions using the service role.
 - Vercel serves immutable hashed assets through its CDN, provides CSP/security headers and an Upstash-backed Edge Middleware limiter, and proxies sensitive function calls.
 - The PWA service worker caches the shell and bundled art for repeat and offline play. Cloud features degrade to a local save when offline.
@@ -92,7 +93,9 @@ Restore procedure:
 
 - Desktop, narrow portrait, drag pan, wheel/pinch zoom, and touch targets.
 - Feed/wash/play changes visible need bars and creature expressions.
+- Objective completion pays its displayed GLOW reward exactly once.
 - Sustained high needs divide a Luma; autonomous buildings serve matching tasks.
+- Building previews reject overlaps and interface areas; Escape and right-click cancel placement.
 - Deep Takers produce resources and visible pollution; exposure damages health and bodies remain.
 - Local autosave survives reload; guest cloud save can be linked to email; Google OAuth redirects back safely.
 - Edge validation rejects malformed saves and physically impossible leaderboard jumps.

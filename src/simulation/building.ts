@@ -30,6 +30,18 @@ export function canAfford(resources: Resources, kind: BuildingKind): boolean {
   return resources.glow >= cost.glow && resources.alloy >= cost.alloy;
 }
 
+export interface PlacementResult { ok: boolean; reason?: string }
+
+export function validateBuildingPlacement(buildings: BuildingState[], x: number, y: number): PlacementResult {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 60 || x > 1540 || y < 80 || y > 930) {
+    return { ok: false, reason: 'Place it inside the habitat boundary' };
+  }
+  if (buildings.some((building) => Math.hypot(building.x - x, building.y - y) < 112)) {
+    return { ok: false, reason: 'Leave more room between structures' };
+  }
+  return { ok: true };
+}
+
 export function createBuilding(kind: BuildingKind, x: number, y: number, index: number): BuildingState {
   return { id: `b${index}`, kind, x, y, level: 1, active: true };
 }

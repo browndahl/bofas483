@@ -23,7 +23,7 @@ const PAGES = [
   },
   {
     title: 'CONTROLS & SIGNALS',
-    body: 'SELECT\nClick or tap a Luma to make it the active care target. Its ring and name brighten.\n\nMOVE THE HABITAT\nDrag empty ground to pan. Use the mouse wheel or pinch with two fingers to zoom.\n\nBUILD\nChoose a facility, then click or tap a valid location inside the habitat. Construction fails if you lack resources.\n\nSTATUS SIGNALS\n! hungry   ≋ dirty   z tired   · unhappy   ☣ sick\nSILENT means the Luma has died and cannot be restored.\n\nSAVE\nLocal progress saves automatically every 15 seconds. SAVE also attempts a cloud save when identity services are connected.\n\nAUDIT\nShows what the habitat currently infers about your decisions. IDENTITY connects cloud saving.'
+    body: 'SELECT\nClick or tap a Luma to make it the active care target. Its ring and name brighten.\n\nMOVE THE HABITAT\nDrag empty ground to pan. Use the mouse wheel or pinch with two fingers to zoom. Zoom stays centred beneath your pointer.\n\nBUILD\nChoose a facility, then click or tap a valid location inside the habitat. Red means blocked. Structures need clear space. Press Escape or right-click to cancel placement.\n\nSTATUS SIGNALS\n! hungry   ≋ dirty   z tired   · unhappy   ☣ sick\nSILENT means the Luma has died and cannot be restored.\n\nSAVE\nLocal progress saves automatically every 15 seconds. SAVE also attempts a cloud save when identity services are connected.\n\nAUDIT\nShows what the habitat currently infers about your decisions. IDENTITY connects cloud saving.'
   }
 ] as const;
 

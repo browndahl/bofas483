@@ -39,6 +39,7 @@ export class WorldScene extends Phaser.Scene {
   private effectPool: Phaser.GameObjects.Rectangle[] = [];
   private ambientMotes: AmbientMote[] = [];
   private pollutionSignature = '';
+  private audioContext?: AudioContext;
 
   constructor() { super('WorldScene'); }
   create() {
@@ -53,6 +54,7 @@ export class WorldScene extends Phaser.Scene {
     this.game.events.on('focus-creature', this.focusCreature, this);
     this.game.events.on('care-effect', this.playCareEffect, this);
     this.scale.on('resize', this.handleResize, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
     this.scene.launch('UIScene');
     this.scene.launch('GlitchOverlayScene');
     this.time.delayedCall(700, () => this.game.events.emit('open-dialogue', 'awakening'));
@@ -73,13 +75,17 @@ export class WorldScene extends Phaser.Scene {
     crisp(this.add.text(52, 42, 'HABITAT 483  ·  LUMEN FIELD', { fontFamily: DISPLAY_FONT, fontSize: '13px', color: '#fff1ba', backgroundColor: '#3a2918cc', padding: { x: 9, y: 5 }, letterSpacing: 1 })).setDepth(3);
   }
   private configureInput() {
+    this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.rightButtonDown()) { this.cancelPlacement(); return; }
+      if (this.placementGhost) return;
       this.dragging = true; this.dragStart.set(pointer.x, pointer.y); this.cameraStart.set(this.cameras.main.scrollX, this.cameras.main.scrollY);
     });
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       if (this.placementGhost) {
         const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
         this.placementGhost.setPosition(point.x, point.y);
+        this.updatePlacementGhost(point.x, point.y);
       } else if (this.dragging && pointer.isDown && pointer.getDistance() > 8) {
         const zoom = this.cameras.main.zoom;
         this.cameras.main.scrollX = this.cameraStart.x - (pointer.x - this.dragStart.x) / zoom;
@@ -88,24 +94,39 @@ export class WorldScene extends Phaser.Scene {
       const p1 = this.input.pointer1; const p2 = this.input.pointer2;
       if (p1.isDown && p2.isDown) {
         const distance = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
-        if (this.lastPinchDistance) this.cameras.main.zoom = Phaser.Math.Clamp(this.cameras.main.zoom * (distance / this.lastPinchDistance), 0.55, 1.7);
+        if (this.lastPinchDistance) this.zoomAt((p1.x + p2.x) / 2, (p1.y + p2.y) / 2, this.cameras.main.zoom * (distance / this.lastPinchDistance));
         this.lastPinchDistance = distance;
       } else this.lastPinchDistance = 0;
     });
     this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.button === 2) { this.cancelPlacement(); this.dragging = false; return; }
       if (this.placementKind && this.placementGhost) {
         const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-        if (point.x > 60 && point.x < 1540 && point.y > 80 && point.y < 930 && gameStore.place(this.placementKind, point.x, point.y)) {
+        const placement = gameStore.canPlace(this.placementKind, point.x, point.y);
+        if (pointer.y > 58 && pointer.y < this.scale.height - 66 && placement.ok && gameStore.place(this.placementKind, point.x, point.y)) {
           this.game.events.emit('toast', `${BUILDINGS[this.placementKind].name} connected`);
           this.soundPulse(180, 320);
-        } else this.game.events.emit('toast', 'Insufficient resources or invalid site');
-        this.placementGhost.destroy(); this.placementGhost = undefined; this.placementKind = undefined;
+          this.cancelPlacement(false);
+        } else {
+          this.game.events.emit('toast', pointer.y <= 58 || pointer.y >= this.scale.height - 66 ? 'Place it away from interface controls' : placement.reason ?? 'Invalid building site');
+        }
       }
       this.dragging = false;
     });
-    this.input.on('wheel', (_pointer: Phaser.Input.Pointer, _objects: unknown[], _dx: number, dy: number) => {
-      this.cameras.main.zoom = Phaser.Math.Clamp(this.cameras.main.zoom - dy * 0.001, 0.55, 1.7);
+    this.input.on('wheel', (pointer: Phaser.Input.Pointer, _objects: unknown[], _dx: number, dy: number) => {
+      this.zoomAt(pointer.x, pointer.y, this.cameras.main.zoom - dy * 0.001);
     });
+    this.input.keyboard?.on('keydown-ESC', () => this.cancelPlacement());
+  }
+  private zoomAt(screenX: number, screenY: number, requestedZoom: number) {
+    const camera = this.cameras.main;
+    const nextZoom = Phaser.Math.Clamp(requestedZoom, 0.55, 1.7);
+    if (Math.abs(nextZoom - camera.zoom) < 0.0001) return;
+    const before = camera.getWorldPoint(screenX, screenY);
+    camera.setZoom(nextZoom);
+    const after = camera.getWorldPoint(screenX, screenY);
+    camera.scrollX += before.x - after.x;
+    camera.scrollY += before.y - after.y;
   }
   private handleResize = () => {
     if (this.scale.width < 650 || this.cameras.main.zoom < 0.7) this.cameras.main.setZoom(this.baseZoom());
@@ -132,7 +153,22 @@ export class WorldScene extends Phaser.Scene {
     const base = this.add.image(0, 0, 'building-base').setTint(def.color).setAlpha(0.45);
     const glyph = crisp(this.add.text(0, 0, def.glyph, { fontFamily: UI_FONT, fontSize: '28px', color: '#071410' })).setOrigin(0.5);
     this.placementGhost = this.add.container(800, 500, [base, glyph]).setDepth(20);
+    const pointer = this.input.activePointer;
+    const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    this.placementGhost.setPosition(point.x, point.y);
+    this.updatePlacementGhost(point.x, point.y);
   };
+  private updatePlacementGhost(x: number, y: number) {
+    if (!this.placementGhost || !this.placementKind) return;
+    const base = this.placementGhost.getAt(0) as Phaser.GameObjects.Image;
+    const placement = gameStore.canPlace(this.placementKind, x, y);
+    base.setTint(placement.ok ? BUILDINGS[this.placementKind].color : 0xff735f).setAlpha(placement.ok ? 0.55 : 0.38);
+  }
+  private cancelPlacement(showMessage = true) {
+    if (!this.placementGhost && !this.placementKind) return;
+    this.placementGhost?.destroy(); this.placementGhost = undefined; this.placementKind = undefined;
+    if (showMessage) this.game.events.emit('toast', 'Building placement cancelled');
+  }
   private createCreatureView(creature: CreatureState): CreatureView {
     const shadow = this.add.ellipse(2, 29, 48, 13, 0x18200e, 0.48);
     const aura = this.add.circle(0, 0, 34, Phaser.Display.Color.HSVToRGB(creature.hue / 360, 0.52, 0.96).color, 0.1).setBlendMode(Phaser.BlendModes.ADD);
@@ -273,7 +309,9 @@ export class WorldScene extends Phaser.Scene {
   private soundPulse(frequency: number, duration: number) {
     try {
       const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const context = new AudioContextClass(); const oscillator = context.createOscillator(); const gain = context.createGain();
+      const context = this.audioContext ?? new AudioContextClass(); this.audioContext = context;
+      if (context.state === 'suspended') void context.resume();
+      const oscillator = context.createOscillator(); const gain = context.createGain();
       oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(frequency, context.currentTime); oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.35, context.currentTime + duration / 1000);
       gain.gain.setValueAtTime(0.055, context.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + duration / 1000);
       oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + duration / 1000);
@@ -302,6 +340,15 @@ export class WorldScene extends Phaser.Scene {
     });
   }
   shutdown() {
-    this.unsubscribe?.(); this.game.events.off('care', this.handleCare, this); this.game.events.off('build-select', this.handleBuildSelect, this); this.game.events.off('care-effect', this.playCareEffect, this); this.scale.off('resize', this.handleResize, this);
+    this.unsubscribe?.(); this.unsubscribe = undefined;
+    this.game.events.off('care', this.handleCare, this);
+    this.game.events.off('build-select', this.handleBuildSelect, this);
+    this.game.events.off('focus-creature', this.focusCreature, this);
+    this.game.events.off('care-effect', this.playCareEffect, this);
+    this.scale.off('resize', this.handleResize, this);
+    this.input.keyboard?.off('keydown-ESC');
+    this.cancelPlacement(false);
+    if (this.audioContext && this.audioContext.state !== 'closed') void this.audioContext.close();
+    this.audioContext = undefined;
   }
 }

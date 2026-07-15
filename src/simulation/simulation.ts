@@ -1,12 +1,21 @@
 import { BUILDINGS, taskBuilding } from './building';
 import { advanceReproduction, chooseTask, decayNeeds, divideCreature } from './creature';
-import type { BuildingState, CreatureState, WorldState } from './worldState';
+import type { BuildingKind, BuildingState, CreatureState, WorldState } from './worldState';
+import { appendWorldEvent } from './worldState';
+import { resolveObjectiveProgress } from './progression';
 
 const WORLD_WIDTH = 1600;
 const WORLD_HEIGHT = 1000;
 
-function nearestBuilding(creature: CreatureState, buildings: BuildingState[], kind: string): BuildingState | undefined {
-  return buildings.filter((b) => b.kind === kind && b.active).sort((a, b) => Math.hypot(a.x - creature.x, a.y - creature.y) - Math.hypot(b.x - creature.x, b.y - creature.y))[0];
+function nearestBuilding(creature: CreatureState, buildings: BuildingState[]): BuildingState | undefined {
+  let nearest: BuildingState | undefined;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const building of buildings) {
+    const dx = building.x - creature.x; const dy = building.y - creature.y;
+    const distance = dx * dx + dy * dy;
+    if (distance < nearestDistance) { nearest = building; nearestDistance = distance; }
+  }
+  return nearest;
 }
 
 export function spreadPollution(map: number[], width: number, height: number, sources: Array<{ x: number; y: number; amount: number }>, seconds: number): number[] {
@@ -38,19 +47,25 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
   next.time += seconds;
   const sources = next.buildings.map((b) => ({ x: b.x, y: b.y, amount: BUILDINGS[b.kind].pollution }));
   next.pollution = spreadPollution(next.pollution, next.pollutionWidth, next.pollutionHeight, sources, seconds);
+  const buildingsByKind = new Map<BuildingKind, BuildingState[]>();
+  next.buildings.forEach((building) => {
+    if (!building.active) return;
+    const group = buildingsByKind.get(building.kind) ?? [];
+    group.push(building); buildingsByKind.set(building.kind, group);
+  });
   const newborns: CreatureState[] = [];
   next.creatures = next.creatures.map((raw) => {
     if (!raw.alive) return raw;
     const creature = advanceReproduction(decayNeeds(raw, seconds, pollutionAt(next, raw.x, raw.y)), seconds);
     if (creature.needs.health <= 0) {
       creature.alive = false; creature.task = 'dead'; creature.deathAge = creature.age; next.deaths++;
-      next.profile.empathy -= 1; next.events.push({ type: 'creature_death', at: next.time, payload: { id: creature.id, exposure: creature.exposure } });
+      next.profile.empathy -= 1; appendWorldEvent(next, { type: 'creature_death', at: next.time, payload: { id: creature.id, exposure: creature.exposure } });
       return creature;
     }
     const task = chooseTask(creature, next.buildings);
     creature.task = task;
     const kind = taskBuilding[task];
-    const building = kind ? nearestBuilding(creature, next.buildings, kind) : undefined;
+    const building = kind ? nearestBuilding(creature, buildingsByKind.get(kind) ?? []) : undefined;
     if (building) { creature.target = { x: building.x, y: building.y + 38 }; creature.destinationBuildingId = building.id; }
     else if (Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y) < 14) {
       const theta = ((next.seed + creature.age * 19 + Number(creature.id.slice(1)) * 41) % 628) / 100;
@@ -74,10 +89,10 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
   });
   if (newborns.length) {
     next.creatures.push(...newborns);
-    next.events.push({ type: 'division', at: next.time, payload: { count: newborns.length } });
+    appendWorldEvent(next, { type: 'division', at: next.time, payload: { count: newborns.length } });
   }
   const living = next.creatures.filter((c) => c.alive).length;
   next.populationPeak = Math.max(next.populationPeak, living);
   next.chapter = living >= 14 || next.deaths >= 3 ? 4 : living >= 8 ? 3 : living >= 3 ? 2 : 1;
-  return next;
+  return resolveObjectiveProgress(next);
 }

@@ -62,6 +62,13 @@ export interface WorldState {
   endingId?: string;
 }
 
+export const MAX_EVENT_HISTORY = 500;
+
+export function appendWorldEvent(world: WorldState, event: GameEvent) {
+  world.events.push(event);
+  if (world.events.length > MAX_EVENT_HISTORY) world.events.splice(0, world.events.length - MAX_EVENT_HISTORY);
+}
+
 const names = ['Pip', 'Mote', 'Iri', 'Nim', 'Vela', 'Odo', 'Rua', 'Kip', 'Sola', 'Tem', 'Uma', 'Bram'];
 
 export function makeCreature(id: string, x: number, y: number, generation = 0): CreatureState {

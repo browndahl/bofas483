@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { chooseTask, decayNeeds, reproductionReady } from '../src/simulation/creature';
 import { findPath } from '../src/simulation/pathfinding';
 import { spreadPollution, tickWorld } from '../src/simulation/simulation';
-import { createBuilding } from '../src/simulation/building';
-import { createInitialWorld } from '../src/simulation/worldState';
+import { createBuilding, validateBuildingPlacement } from '../src/simulation/building';
+import { appendWorldEvent, createInitialWorld, MAX_EVENT_HISTORY } from '../src/simulation/worldState';
+import { parseWorldState } from '../src/simulation/worldSchema';
 
 describe('creature simulation', () => {
   it('decays needs at their configured rates', () => {
@@ -24,6 +25,17 @@ describe('creature simulation', () => {
     const world = createInitialWorld(1); world.creatures[0].age = 30; world.creatures[0].reproduction = 99.9; world.creatures[0].needs = { hunger: 100, hygiene: 100, happiness: 100, health: 100, energy: 100 };
     const next = tickWorld(world, 0.2); expect(next.creatures).toHaveLength(2); expect(next.events.some((event) => event.type === 'division')).toBe(true);
   });
+  it('awards objective resources exactly once', () => {
+    const world = createInitialWorld(1);
+    appendWorldEvent(world, { type: 'manual_hunger', at: 0, payload: { creatureId: 'c1' } });
+    const completed = tickWorld(world, 0.2);
+    expect(completed.completedObjectives).toEqual(['first-care']);
+    expect(completed.resources.glow).toBeCloseTo(98);
+    const next = tickWorld(completed, 0.2);
+    expect(next.completedObjectives).toEqual(['first-care']);
+    expect(next.resources.glow).toBeCloseTo(98);
+    expect(next.events.filter((event) => event.type === 'objective_complete')).toHaveLength(1);
+  });
 });
 
 describe('environment and navigation', () => {
@@ -34,5 +46,24 @@ describe('environment and navigation', () => {
   it('finds a route around blocked cells', () => {
     const path = findPath({ x: 0, y: 0 }, { x: 2, y: 0 }, new Set(['1,0']), 3, 3);
     expect(path[0]).toEqual({ x: 0, y: 0 }); expect(path.at(-1)).toEqual({ x: 2, y: 0 }); expect(path).not.toContainEqual({ x: 1, y: 0 });
+  });
+  it('rejects overlapping and out-of-bounds building sites', () => {
+    const building = createBuilding('nutrient-bed', 500, 500, 1);
+    expect(validateBuildingPlacement([building], 550, 530).ok).toBe(false);
+    expect(validateBuildingPlacement([building], 20, 500).ok).toBe(false);
+    expect(validateBuildingPlacement([building], 800, 500).ok).toBe(true);
+  });
+});
+
+describe('state integrity', () => {
+  it('rejects malformed pollution grids', () => {
+    const world = createInitialWorld(1); world.pollution.pop();
+    expect(parseWorldState(world)).toBeNull();
+  });
+  it('caps event history at a bounded size', () => {
+    const world = createInitialWorld(1);
+    for (let index = 0; index < MAX_EVENT_HISTORY + 40; index++) appendWorldEvent(world, { type: 'test', at: index, payload: {} });
+    expect(world.events).toHaveLength(MAX_EVENT_HISTORY);
+    expect(world.events[0].at).toBe(40);
   });
 });
