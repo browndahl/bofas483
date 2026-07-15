@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { crisp, UI_FONT } from '../ui/typography';
 
 export class GlitchOverlayScene extends Phaser.Scene {
   private strips: Phaser.GameObjects.Rectangle[] = [];
@@ -13,7 +14,7 @@ export class GlitchOverlayScene extends Phaser.Scene {
       strip.setPosition(Phaser.Math.Between(-30, 30), Phaser.Math.Between(0, height)).setSize(width + 60, Phaser.Math.Between(1, 10)).setAlpha(intensity * (index % 3 === 0 ? 0.32 : 0.12));
       this.tweens.add({ targets: strip, x: Phaser.Math.Between(-80, 80), alpha: 0, duration: Phaser.Math.Between(80, 310) });
     });
-    const error = this.add.text(width / 2 + Phaser.Math.Between(-40, 40), height / 2, intensity > 0.8 ? 'ERR_483: WITNESS STATE DIVERGED' : 'memory boundary unstable', { fontFamily: 'monospace', fontSize: intensity > 0.8 ? '18px' : '10px', color: '#ff735f', backgroundColor: '#071410' }).setOrigin(0.5).setDepth(1001);
+    const error = crisp(this.add.text(width / 2 + Phaser.Math.Between(-40, 40), height / 2, intensity > 0.8 ? 'ERR_483: WITNESS STATE DIVERGED' : 'memory boundary unstable', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: intensity > 0.8 ? '19px' : '12px', color: '#ff735f', backgroundColor: '#071410' })).setOrigin(0.5).setDepth(1001);
     this.tweens.add({ targets: error, x: error.x + 16, alpha: 0, duration: 450, onComplete: () => error.destroy() });
   };
   shutdown() { this.game.events.off('glitch', this.glitch, this); }

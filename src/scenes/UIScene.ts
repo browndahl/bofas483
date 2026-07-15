@@ -6,6 +6,7 @@ import { gameStore } from '../state/gameStateStore';
 import { saveService } from '../services/saveService';
 import { BuildingMenu } from '../ui/buildingMenu';
 import { button, meter, panel } from '../ui/hud';
+import { CODE_FONT, crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
 
 interface MeterView { fill: Phaser.GameObjects.Rectangle; width: number; target: number }
 
@@ -44,16 +45,16 @@ export class UIScene extends Phaser.Scene {
   private createHud() {
     this.topPanel = panel(this, 0, 0, 100, 58).setOrigin(0, 0).setDepth(100);
     this.topAccent = this.add.rectangle(0, 57, 100, 2, 0x7af6bd, 0.65).setOrigin(0, 0).setDepth(101);
-    this.add.text(20, 12, 'bofas483', { fontFamily: 'monospace', fontStyle: 'bold', fontSize: '19px', color: '#91ffd0', letterSpacing: 3 }).setDepth(101).setName('brand');
-    this.chapterText = this.add.text(20, 37, 'CHAPTER 01 / TENDER SIGNAL', { fontFamily: 'monospace', fontSize: '9px', color: '#82ae99', letterSpacing: 1 }).setDepth(101).setName('chapter');
-    this.resourcesText = this.add.text(0, 17, '', { fontFamily: 'monospace', fontSize: '12px', color: '#e9fff5' }).setOrigin(1, 0).setDepth(101);
-    this.populationText = this.add.text(0, 36, '', { fontFamily: 'monospace', fontSize: '9px', color: '#8eb4a2' }).setOrigin(1, 0).setDepth(101);
-    this.objectiveText = this.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '10px', color: '#e5fff2', backgroundColor: '#0a2118ed', padding: { x: 14, y: 9 }, wordWrap: { width: 310 }, lineSpacing: 3 }).setDepth(101).setStroke('#071410', 1);
+    crisp(this.add.text(20, 11, 'bofas483', { fontFamily: DISPLAY_FONT, fontSize: '19px', color: '#91ffd0', letterSpacing: 2 })).setDepth(101).setName('brand');
+    this.chapterText = crisp(this.add.text(20, 36, 'CHAPTER 01 / TENDER SIGNAL', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#9bc7b2', letterSpacing: 0.5 })).setDepth(101).setName('chapter');
+    this.resourcesText = crisp(this.add.text(0, 15, '', { fontFamily: CODE_FONT, fontStyle: 'bold', fontSize: '13px', color: '#f1fff8' })).setOrigin(1, 0).setDepth(101);
+    this.populationText = crisp(this.add.text(0, 35, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#a8cdbb' })).setOrigin(1, 0).setDepth(101);
+    this.objectiveText = crisp(this.add.text(0, 0, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '12px', color: '#f1fff8', backgroundColor: '#0a2118f2', padding: { x: 14, y: 10 }, wordWrap: { width: 330 }, lineSpacing: 4 })).setDepth(101).setStroke('#071410', 1);
 
     this.creaturePanel = this.add.container(0, 0).setDepth(110);
     this.creaturePanel.add(panel(this, 0, 0, 280, 294));
-    this.creatureName = this.add.text(-120, -124, 'PIP-01', { fontFamily: 'monospace', fontStyle: 'bold', fontSize: '16px', color: '#91ffd0', letterSpacing: 1 });
-    this.creatureStatus = this.add.text(120, -122, 'ALIVE', { fontFamily: 'monospace', fontSize: '9px', color: '#82ae99' }).setOrigin(1, 0);
+    this.creatureName = crisp(this.add.text(-120, -124, 'PIP-01', { fontFamily: DISPLAY_FONT, fontSize: '16px', color: '#91ffd0', letterSpacing: 0.7 }));
+    this.creatureStatus = crisp(this.add.text(120, -122, 'ALIVE', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#9bc7b2' })).setOrigin(1, 0);
     this.creaturePanel.add([this.creatureName, this.creatureStatus]);
     const meterDefs = [['hunger', 'NOURISHMENT', 0xf7bd62], ['hygiene', 'CLARITY', 0x65c7ff], ['happiness', 'RESONANCE', 0xbf78ff], ['health', 'INTEGRITY', 0x7af6bd], ['energy', 'CHARGE', 0xff8fcf]] as const;
     meterDefs.forEach(([key, label, color], index) => {
@@ -76,6 +77,8 @@ export class UIScene extends Phaser.Scene {
     });
     const authButton = button(this, 0, 0, 100, 38, 'IDENTITY', 0xf7bd62).setDepth(120).setName('auth-button');
     authButton.on('pointerup', () => this.scene.launch('AuthScene'));
+    const guideButton = button(this, 0, 0, 104, 38, 'GUIDE  ?', 0xff8fcf).setDepth(120).setName('guide-button');
+    guideButton.on('pointerup', () => this.scene.launch('GuideScene'));
   }
   private layout = () => {
     const { width, height } = this.scale; const portrait = width < 650;
@@ -88,12 +91,13 @@ export class UIScene extends Phaser.Scene {
     (this.children.getByName('profile-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? 68 : width - 230, height - 40);
     (this.children.getByName('save-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? 174 : width - 356, height - 40);
     (this.children.getByName('auth-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? this.scale.width - 58 : width - 468, portrait ? 92 : height - 40);
+    (this.children.getByName('guide-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? this.scale.width - 64 : width - 582, portrait ? 140 : height - 40);
     if (this.buildMenu) { this.buildMenu.setPosition(width / 2, height / 2); }
   };
   private updateState(state: WorldState) {
     this.state = state;
     const living = state.creatures.filter((c) => c.alive);
-    this.resourcesText.setText(`◈ ${Math.floor(state.resources.glow)}   ⬡ ${Math.floor(state.resources.alloy)}`);
+    this.resourcesText.setText(`GLOW ${Math.floor(state.resources.glow)}   ·   ALLOY ${Math.floor(state.resources.alloy)}`);
     this.populationText.setText(`LIVING ${living.length}  /  SILENT ${state.deaths}  /  ${Math.floor(state.time)}s`);
     const chapterNames = ['TENDER SIGNAL', 'THE CHORUS', 'THROUGHPUT', 'THE AUDIT', 'VERDICT'];
     this.chapterText.setText(`CHAPTER 0${state.chapter} / ${chapterNames[state.chapter - 1]}`);
@@ -144,7 +148,7 @@ export class UIScene extends Phaser.Scene {
     if (!this.state.dialogueHistory.includes(id) && !this.scene.isActive('DialogueScene')) this.scene.launch('DialogueScene', { id });
   };
   private showToast = (message: string) => {
-    this.toast?.destroy(); this.toast = this.add.text(this.scale.width / 2, this.scale.height - 84, message, { fontFamily: 'monospace', fontSize: '12px', color: '#071410', backgroundColor: '#7af6bd', padding: { x: 14, y: 9 } }).setOrigin(0.5).setDepth(500);
+    this.toast?.destroy(); this.toast = crisp(this.add.text(this.scale.width / 2, this.scale.height - 84, message, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '13px', color: '#071410', backgroundColor: '#7af6bd', padding: { x: 14, y: 9 } })).setOrigin(0.5).setDepth(500);
     this.tweens.add({ targets: this.toast, alpha: 0, y: this.toast.y - 18, delay: 1600, duration: 500, onComplete: () => { this.toast?.destroy(); this.toast = undefined; } });
   };
   update(_time: number, delta: number) {

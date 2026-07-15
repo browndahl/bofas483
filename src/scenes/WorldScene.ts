@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { BUILDINGS } from '../simulation/building';
 import type { BuildingKind, BuildingState, CreatureState, WorldState } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
+import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
 
 interface CreatureView {
   container: Phaser.GameObjects.Container;
@@ -97,8 +98,8 @@ export class WorldScene extends Phaser.Scene {
       const node = this.add.circle(originX, originY, 1 + (i % 3), i % 7 === 0 ? 0xd69aff : 0x88ffd0, 0.16 + (i % 4) * 0.04).setDepth(3).setBlendMode(Phaser.BlendModes.ADD);
       this.ambientMotes.push({ node, originX, originY, phase: i * 0.73, speed: 0.35 + (i % 5) * 0.08 });
     }
-    this.add.text(64, 58, 'HABITAT 483  ·  LUMEN FIELD ONLINE', { fontFamily: 'monospace', fontSize: '12px', color: '#5a9d7d', letterSpacing: 2 }).setDepth(3);
-    this.add.text(WORLD_WIDTH - 64, 58, 'LOCAL TIME / CONTINUOUS WHILE OBSERVED', { fontFamily: 'monospace', fontSize: '9px', color: '#3e765f', letterSpacing: 1 }).setOrigin(1, 0).setDepth(3);
+    crisp(this.add.text(64, 58, 'HABITAT 483  ·  LUMEN FIELD ONLINE', { fontFamily: DISPLAY_FONT, fontSize: '13px', color: '#72b895', letterSpacing: 1.2 })).setDepth(3);
+    crisp(this.add.text(WORLD_WIDTH - 64, 58, 'LOCAL TIME / CONTINUOUS WHILE OBSERVED', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#63997e', letterSpacing: 0.5 })).setOrigin(1, 0).setDepth(3);
   }
   private configureInput() {
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -158,7 +159,7 @@ export class WorldScene extends Phaser.Scene {
     this.placementGhost?.destroy();
     const def = BUILDINGS[kind];
     const base = this.add.image(0, 0, 'building-base').setTint(def.color).setAlpha(0.45);
-    const glyph = this.add.text(0, 0, def.glyph, { fontSize: '28px', color: '#071410' }).setOrigin(0.5);
+    const glyph = crisp(this.add.text(0, 0, def.glyph, { fontFamily: UI_FONT, fontSize: '28px', color: '#071410' })).setOrigin(0.5);
     this.placementGhost = this.add.container(800, 500, [base, glyph]).setDepth(20);
   };
   private createCreatureView(creature: CreatureState): CreatureView {
@@ -166,9 +167,9 @@ export class WorldScene extends Phaser.Scene {
     const aura = this.add.circle(0, 0, 38, Phaser.Display.Color.HSVToRGB(creature.hue / 360, 0.52, 0.96).color, 0.12).setBlendMode(Phaser.BlendModes.ADD);
     const selection = this.add.circle(0, 0, 35, 0x000000, 0).setStrokeStyle(2, 0x7af6bd, 0);
     const body = this.add.graphics(); const eyes = this.add.graphics();
-    const status = this.add.text(29, -34, '', { fontFamily: 'monospace', fontStyle: 'bold', fontSize: '13px', color: '#071410', backgroundColor: '#f7bd62', padding: { x: 4, y: 2 } }).setOrigin(0.5).setVisible(false);
+    const status = crisp(this.add.text(29, -34, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: '#071410', backgroundColor: '#f7bd62', padding: { x: 4, y: 2 } })).setOrigin(0.5).setVisible(false);
     const actor = this.add.container(0, 0, [aura, selection, body, eyes, status]);
-    const label = this.add.text(0, 44, creature.name, { fontFamily: 'monospace', fontSize: '10px', color: '#c5e9d8', backgroundColor: '#06100cdd', padding: { x: 6, y: 3 } }).setOrigin(0.5).setStroke('#06100c', 1);
+    const label = crisp(this.add.text(0, 44, creature.name, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#d9f5e7', backgroundColor: '#06100cf0', padding: { x: 7, y: 4 } })).setOrigin(0.5).setStroke('#06100c', 1);
     const container = this.add.container(creature.x, creature.y, [shadow, actor, label]).setSize(82, 98).setDepth(10).setInteractive({ useHandCursor: true });
     container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (pointer.getDistance() < 8) { this.selectedId = creature.id; this.syncState(this.state); this.game.events.emit('creature-selected', this.state.creatures.find((c) => c.id === creature.id)); this.soundPulse(520, 80); }
@@ -234,8 +235,8 @@ export class WorldScene extends Phaser.Scene {
     if (building.kind === 'extractor') art.lineStyle(4, def.color, 0.8).lineBetween(-22, 13, 0, -14).lineBetween(0, -14, 22, 13).lineBetween(-22, 13, 22, 13);
     if (building.kind === 'clinic') art.fillStyle(def.color, 0.75).fillRect(-4, -14, 8, 31).fillRect(-15, -3, 30, 8);
     const core = this.add.circle(0, 2, 6, def.color, 0.92).setBlendMode(Phaser.BlendModes.ADD);
-    const glyph = this.add.text(31, -18, def.glyph, { fontFamily: 'monospace', fontSize: '13px', color: Phaser.Display.Color.IntegerToColor(def.color).rgba }).setOrigin(0.5);
-    const name = this.add.text(0, 49, def.name.toUpperCase(), { fontFamily: 'monospace', fontSize: '9px', color: '#c0dece', backgroundColor: '#06100cdd', padding: { x: 6, y: 3 } }).setOrigin(0.5);
+    const glyph = crisp(this.add.text(31, -18, def.glyph, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: Phaser.Display.Color.IntegerToColor(def.color).rgba })).setOrigin(0.5);
+    const name = crisp(this.add.text(0, 49, def.name.toUpperCase(), { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#d5eee2', backgroundColor: '#06100cf0', padding: { x: 7, y: 4 } })).setOrigin(0.5);
     const container = this.add.container(building.x, building.y, [shadow, halo, art, core, glyph, name]).setDepth(7);
     this.tweens.add({ targets: [core, halo], alpha: { from: 0.35, to: 0.9 }, scale: { from: 0.88, to: 1.12 }, duration: 1200 + (building.id.charCodeAt(1) % 5) * 110, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     return container;

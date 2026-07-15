@@ -9,6 +9,7 @@ import { DialogueScene } from './scenes/DialogueScene';
 import { ProfileScene } from './scenes/ProfileScene';
 import { GlitchOverlayScene } from './scenes/GlitchOverlayScene';
 import { AuthScene } from './scenes/AuthScene';
+import { GuideScene } from './scenes/GuideScene';
 import { gameStore } from './state/gameStateStore';
 import { saveService } from './services/saveService';
 import './style.css';
@@ -29,7 +30,7 @@ const game = new Phaser.Game({
   render: { antialias: true, pixelArt: false, roundPixels: false },
   input: { activePointers: 3 },
   dom: { createContainer: true },
-  scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene]
+  scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene, GuideScene]
 });
 
 const restored = saveService.loadLocal();
