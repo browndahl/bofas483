@@ -210,8 +210,10 @@ export class WorldScene extends Phaser.Scene {
     const serial = Number(creature.id.replace(/\D/g, '')) || 1;
     const urgent = Math.min(creature.needs.hunger, creature.needs.hygiene, creature.needs.happiness, creature.needs.health, creature.needs.energy) < 30;
     const social = creature.task === 'socialize' || creature.task === 'comfort';
+    const partnerSerial = creature.destinationCreatureId ? Number(creature.destinationCreatureId.replace(/\D/g, '')) || serial : serial;
+    const socialSpeaker = serial <= partnerSerial;
     const periodic = (Math.floor(this.state.time / 7) + serial) % 7 === 0;
-    const visible = creature.id === this.selectedId || social || urgent || (periodic && this.state.creatures.length < 36);
+    const visible = creature.id === this.selectedId || (social && socialSpeaker) || urgent || (periodic && this.state.creatures.length < 36);
     view.thought.setVisible(visible && creature.alive);
     if (visible) view.thoughtText.setText(this.thoughtFor(creature));
   }
@@ -387,7 +389,7 @@ export class WorldScene extends Phaser.Scene {
       view.actor.rotation = Phaser.Math.Linear(view.actor.rotation, creature.alive ? Phaser.Math.Clamp(dx * 0.002, -0.11, 0.11) : 0, smoothing * 0.5);
       const pulse = 1 + Math.sin(time * 0.003 + phase) * 0.055;
       view.aura.setScale(pulse); view.shadow.setScale(1 - (pulse - 1) * 1.5, 1);
-      view.thought.y = -69 + Math.sin(time * 0.0025 + phase) * 2;
+      view.thought.y = -69 - (Number(creature.id.replace(/\D/g, '')) % 2) * 8 + Math.sin(time * 0.0025 + phase) * 2;
       view.thought.alpha = 0.9 + (Math.sin(time * 0.003 + phase) + 1) * 0.05;
       const inView = view.container.x > camera.worldView.left - 100 && view.container.x < camera.worldView.right + 100 && view.container.y > camera.worldView.top - 100 && view.container.y < camera.worldView.bottom + 100;
       view.container.setVisible(inView);

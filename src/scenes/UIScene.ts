@@ -144,7 +144,7 @@ export class UIScene extends Phaser.Scene {
     this.creatureName.setText(creature.name); this.creatureStatus.setText(creature.alive ? `${creature.task.toUpperCase()} · GEN ${creature.generation}` : 'SILENT').setColor(creature.alive ? '#678779' : '#ff735f');
     const strongestBond = Object.entries(creature.bonds).sort((a, b) => b[1] - a[1])[0];
     const bondName = strongestBond ? this.state.creatures.find((candidate) => candidate.id === strongestBond[0])?.name : undefined;
-    this.creaturePersonality.setText(`${personalityLabels(creature.personality).join(' · ')}${bondName ? `  /  CLOSE TO ${bondName}` : ''}`);
+    this.creaturePersonality.setText(`${personalityLabels(creature.personality).join(' · ')}${bondName ? `  /  CLOSE TO ${bondName} ${Math.round(strongestBond[1])}%` : ''}`);
     Object.entries(creature.needs).forEach(([key, value]) => {
       const view = this.meters.get(key); if (view) view.target = view.width * value / 100;
     });

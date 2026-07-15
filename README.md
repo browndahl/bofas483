@@ -27,7 +27,7 @@ npm run preview
 
 - Phaser renders an original bundled pixel-art habitat, procedural actors and structures, pooled effects, synthesized interaction tones, responsive HUD, dialogue, audits, and fiction-contained glitches.
 - Typed creature/building state is independent of Phaser objects. A Web Worker advances needs, inherited personalities, friendships, comfort behavior, autonomous tasks, movement, exposure, reproduction, pollution, work, illness, and death on a measured five-Hz cadence; Phaser interpolates state deltas.
-- Active buildings are grouped by kind once per simulation step. A spatial grid bounds nearby-agent searches, while cached navigation grids route creatures around habitat scenery and player structures. Rendering culls off-camera creature views, limits ambient thoughts as the colony grows, and hides most labels at scale. The worker keeps agents as plain data behind a 250-creature cap and relationship histories retain only each creature's eight strongest bonds.
+- Active buildings are grouped by kind once per simulation step. A spatial grid bounds nearby-agent searches, while cached navigation grids route creatures around habitat scenery and player structures. Social behavior uses exclusive pairs, validated open-ground rendezvous points, urgent-need preemption, pursuit deadlines, and movement-stall recovery so agents cannot remain in targeting loops. Rendering culls off-camera creature views, limits ambient thoughts as the colony grows, and hides most labels at scale. The worker keeps agents as plain data behind a 250-creature cap and relationship histories retain only each creature's eight strongest bonds.
 - Zod validates local and cloud save data before hydration. Event history is capped, objective rewards are idempotent, and legacy raw local saves remain compatible.
 - Supabase handles anonymous, email/password, and Google auth; private saves and event logs use RLS. Sensitive writes go exclusively through validated Edge Functions using the service role.
 - Vercel serves immutable hashed assets through its CDN, provides CSP/security headers and an Upstash-backed Edge Middleware limiter, and proxies sensitive function calls.
@@ -97,6 +97,7 @@ Restore procedure:
 - Sustained high needs divide a Luma; autonomous buildings serve matching tasks.
 - Personalities remain stable across reloads, children inherit a blend of parent traits, and nearby Luma socialize or comfort distressed friends.
 - Thought bubbles explain current intent; pink links show friendship and green links show active comfort.
+- Social targets are reciprocal and exclusive; blocked meetings recover automatically and urgent needs interrupt them.
 - Creatures route around major rocks, water, and structures instead of crossing them.
 - Building previews reject overlaps, protected scenery, and interface areas; Escape and right-click cancel placement.
 - Deep Takers produce resources and visible pollution; exposure damages health and bodies remain.

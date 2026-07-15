@@ -23,7 +23,7 @@ const PAGES = [
   },
   {
     title: 'CONTROLS & SIGNALS',
-    body: 'SELECT\nClick or tap a Luma to make it the active care target. Its ring and name brighten. Thought bubbles explain current intent. Pink links show friendship; green links show comfort.\n\nMOVE THE HABITAT\nDrag empty ground to pan. Use the mouse wheel or pinch with two fingers to zoom. Luma route around structures, water, stone, and each other.\n\nBUILD\nChoose a facility, then click or tap a valid location. Red means blocked. Structures need clear ground and spacing. Press Escape or right-click to cancel.\n\nSTATUS SIGNALS\n! hungry   ≋ dirty   z tired   · unhappy   ☣ sick   ♡ social   + comforting\nSILENT means the Luma has died and cannot be restored.\n\nSAVE\nLocal progress saves automatically every 15 seconds. SAVE also attempts a cloud save when identity services are connected.\n\nAUDIT\nShows what the habitat currently infers about your decisions. IDENTITY connects cloud saving.'
+    body: 'SELECT\nClick or tap a Luma to make it the active care target. Its ring and name brighten. Thought bubbles explain current intent. Pink links show friendship; green links show comfort.\n\nMOVE THE HABITAT\nDrag empty ground to pan. Use the mouse wheel or pinch with two fingers to zoom. Luma choose open meeting ground and route around structures, water, stone, and each other. Blocked plans time out and recover automatically.\n\nPRIORITIES\nFood, hygiene, sleep, and medical emergencies interrupt social plans. Luma return to friends after their urgent needs are safe.\n\nBUILD\nChoose a facility, then click or tap a valid location. Red means blocked. Structures need clear ground and spacing. Press Escape or right-click to cancel.\n\nSTATUS SIGNALS\n! hungry   ≋ dirty   z tired   · unhappy   ☣ sick   ♡ social   + comforting\nSILENT means the Luma has died and cannot be restored.\n\nSAVE\nLocal progress saves automatically every 15 seconds. SAVE also attempts a cloud save when identity services are connected.'
   }
 ] as const;
 
@@ -36,6 +36,14 @@ export class GuideScene extends Phaser.Scene {
   constructor() { super('GuideScene'); }
 
   create() {
+    this.buildLayout();
+    this.scale.on('resize', this.handleResize, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
+  }
+
+  private buildLayout() {
+    this.children.removeAll(true);
+    this.tabs = [];
     const { width, height } = this.scale;
     const cardWidth = Math.min(760, width - 24);
     const cardHeight = Math.min(680, height - 24);
@@ -54,8 +62,12 @@ export class GuideScene extends Phaser.Scene {
       const tab = button(this, left + 26 + tabWidth / 2 + index * (tabWidth + gap), top + cardHeight - 30, tabWidth, 38, label, index === 0 ? 0xf7bd62 : 0x7af6bd);
       tab.on('pointerup', () => this.showPage(index)); this.tabs.push(tab);
     });
-    this.showPage(0);
+    this.showPage(this.page);
   }
+
+  private handleResize = () => this.buildLayout();
+
+  private shutdown() { this.scale.off('resize', this.handleResize, this); }
 
   private showPage(index: number) {
     this.page = index;

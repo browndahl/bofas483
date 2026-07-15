@@ -13,7 +13,9 @@ const creature = z.object({
   navigationPath: z.array(vec2).max(128).optional(), navigationTarget: vec2.optional(), needs,
   task: z.enum(['wander', 'eat', 'bathe', 'play', 'sleep', 'work', 'heal', 'socialize', 'comfort', 'dead']), age: finite,
   exposure: finite, reproduction: finite, alive: z.boolean(), deathAge: finite.optional(), generation: z.number().int().min(0), hue: finite,
-  personality: creaturePersonality.optional(), bonds: z.record(finite.min(0).max(100)).optional(), socialCooldown: finite.nonnegative().optional(), socialTimer: finite.nonnegative().optional()
+  personality: creaturePersonality.optional(), bonds: z.record(finite.min(0).max(100)).optional(),
+  socialCooldown: finite.nonnegative().optional(), socialTimer: finite.nonnegative().optional(), socialPursuitTimer: finite.nonnegative().optional(),
+  socialTarget: vec2.optional(), stuckTimer: finite.nonnegative().optional()
 });
 const building = z.object({
   id: z.string().min(1).max(40), kind: z.enum(['nutrient-bed', 'wash-pool', 'resonance-garden', 'nest', 'extractor', 'clinic']),
@@ -45,6 +47,8 @@ export function parseWorldState(value: unknown): WorldState | null {
     creatureState.bonds = Object.fromEntries(Object.entries(creatureState.bonds ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 8));
     creatureState.socialCooldown ??= 0;
     creatureState.socialTimer ??= 0;
+    creatureState.socialPursuitTimer ??= 0;
+    creatureState.stuckTimer ??= 0;
   });
   const world = result.data as WorldState;
   if (world.events.length > MAX_EVENT_HISTORY) world.events = world.events.slice(-MAX_EVENT_HISTORY);

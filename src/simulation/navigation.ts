@@ -6,6 +6,7 @@ const GRID_WIDTH = 32;
 const GRID_HEIGHT = 20;
 
 interface CircleObstacle { x: number; y: number; radius: number }
+export interface SocialMeeting { first: Vec2; second: Vec2 }
 
 // Major rocks and pools visible in the habitat art. The outer forest is handled by world bounds.
 export const HABITAT_OBSTACLES: CircleObstacle[] = [
@@ -92,6 +93,29 @@ export function buildNavigationPath(start: Vec2, target: Vec2, buildings: Buildi
   if (requestedGoalIsOpen || destinationBuildingId) points.push({ ...target });
   else points.push(toWorld(goalCell));
   return points;
+}
+
+export function findSocialMeeting(firstCreature: Vec2, secondCreature: Vec2, buildings: BuildingState[]): SocialMeeting | undefined {
+  const midpoint = { x: (firstCreature.x + secondCreature.x) / 2, y: (firstCreature.y + secondCreature.y) / 2 };
+  const pairDx = secondCreature.x - firstCreature.x; const pairDy = secondCreature.y - firstCreature.y;
+  const pairLength = Math.hypot(pairDx, pairDy);
+  const perpendicular = pairLength > 0 ? { x: -pairDy / pairLength, y: pairDx / pairLength } : { x: 0, y: 1 };
+  const candidates: Vec2[] = [midpoint];
+  for (const radius of [70, 120, 175]) {
+    for (let index = 0; index < 8; index++) {
+      const angle = index / 8 * Math.PI * 2;
+      candidates.push({ x: midpoint.x + Math.cos(angle) * radius, y: midpoint.y + Math.sin(angle) * radius });
+    }
+  }
+  for (const center of candidates) {
+    const first = { x: center.x + perpendicular.x * 30, y: center.y + perpendicular.y * 30 };
+    const second = { x: center.x - perpendicular.x * 30, y: center.y - perpendicular.y * 30 };
+    if (isNavigationBlocked(first, buildings) || isNavigationBlocked(second, buildings)) continue;
+    const firstReachable = Math.hypot(first.x - firstCreature.x, first.y - firstCreature.y) < 12 || buildNavigationPath(firstCreature, first, buildings).length > 0;
+    const secondReachable = Math.hypot(second.x - secondCreature.x, second.y - secondCreature.y) < 12 || buildNavigationPath(secondCreature, second, buildings).length > 0;
+    if (firstReachable && secondReachable) return { first, second };
+  }
+  return undefined;
 }
 
 export function isNavigationBlocked(point: Vec2, buildings: BuildingState[], destinationBuildingId?: string): boolean {

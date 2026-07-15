@@ -30,6 +30,9 @@ export interface CreatureState {
   bonds: Record<string, number>;
   socialCooldown: number;
   socialTimer: number;
+  socialPursuitTimer: number;
+  socialTarget?: Vec2;
+  stuckTimer: number;
 }
 export interface BuildingState {
   id: string;
@@ -102,7 +105,9 @@ export function makeCreature(id: string, x: number, y: number, generation = 0, p
     personality: createCreaturePersonality(id, generation, parentPersonality),
     bonds: {},
     socialCooldown: 5 + index % 8,
-    socialTimer: 0
+    socialTimer: 0,
+    socialPursuitTimer: 0,
+    stuckTimer: 0
   };
 }
 
