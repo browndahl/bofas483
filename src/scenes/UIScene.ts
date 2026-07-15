@@ -7,13 +7,14 @@ import { saveService } from '../services/saveService';
 import { BuildingMenu } from '../ui/buildingMenu';
 import { button, meter, panel } from '../ui/hud';
 
-interface MeterView { fill: Phaser.GameObjects.Rectangle; width: number }
+interface MeterView { fill: Phaser.GameObjects.Rectangle; width: number; target: number }
 
 export class UIScene extends Phaser.Scene {
   private state = gameStore.get();
   private selected?: CreatureState;
   private unsubscribe?: () => void;
   private topPanel!: Phaser.GameObjects.Rectangle;
+  private topAccent!: Phaser.GameObjects.Rectangle;
   private resourcesText!: Phaser.GameObjects.Text;
   private populationText!: Phaser.GameObjects.Text;
   private chapterText!: Phaser.GameObjects.Text;
@@ -42,16 +43,17 @@ export class UIScene extends Phaser.Scene {
   }
   private createHud() {
     this.topPanel = panel(this, 0, 0, 100, 58).setOrigin(0, 0).setDepth(100);
-    this.add.text(20, 14, 'bofas483', { fontFamily: 'monospace', fontSize: '18px', color: '#7af6bd', letterSpacing: 3 }).setDepth(101).setName('brand');
-    this.chapterText = this.add.text(20, 37, 'CHAPTER 01 / TENDER SIGNAL', { fontFamily: 'monospace', fontSize: '9px', color: '#678779', letterSpacing: 1 }).setDepth(101).setName('chapter');
+    this.topAccent = this.add.rectangle(0, 57, 100, 2, 0x7af6bd, 0.65).setOrigin(0, 0).setDepth(101);
+    this.add.text(20, 12, 'bofas483', { fontFamily: 'monospace', fontStyle: 'bold', fontSize: '19px', color: '#91ffd0', letterSpacing: 3 }).setDepth(101).setName('brand');
+    this.chapterText = this.add.text(20, 37, 'CHAPTER 01 / TENDER SIGNAL', { fontFamily: 'monospace', fontSize: '9px', color: '#82ae99', letterSpacing: 1 }).setDepth(101).setName('chapter');
     this.resourcesText = this.add.text(0, 17, '', { fontFamily: 'monospace', fontSize: '12px', color: '#e9fff5' }).setOrigin(1, 0).setDepth(101);
     this.populationText = this.add.text(0, 36, '', { fontFamily: 'monospace', fontSize: '9px', color: '#8eb4a2' }).setOrigin(1, 0).setDepth(101);
-    this.objectiveText = this.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '10px', color: '#d7ede2', backgroundColor: '#071410e8', padding: { x: 12, y: 8 }, wordWrap: { width: 300 } }).setDepth(101);
+    this.objectiveText = this.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '10px', color: '#e5fff2', backgroundColor: '#0a2118ed', padding: { x: 14, y: 9 }, wordWrap: { width: 310 }, lineSpacing: 3 }).setDepth(101).setStroke('#071410', 1);
 
     this.creaturePanel = this.add.container(0, 0).setDepth(110);
     this.creaturePanel.add(panel(this, 0, 0, 280, 294));
-    this.creatureName = this.add.text(-120, -124, 'PIP-01', { fontFamily: 'monospace', fontSize: '15px', color: '#7af6bd' });
-    this.creatureStatus = this.add.text(120, -122, 'ALIVE', { fontFamily: 'monospace', fontSize: '9px', color: '#678779' }).setOrigin(1, 0);
+    this.creatureName = this.add.text(-120, -124, 'PIP-01', { fontFamily: 'monospace', fontStyle: 'bold', fontSize: '16px', color: '#91ffd0', letterSpacing: 1 });
+    this.creatureStatus = this.add.text(120, -122, 'ALIVE', { fontFamily: 'monospace', fontSize: '9px', color: '#82ae99' }).setOrigin(1, 0);
     this.creaturePanel.add([this.creatureName, this.creatureStatus]);
     const meterDefs = [['hunger', 'NOURISHMENT', 0xf7bd62], ['hygiene', 'CLARITY', 0x65c7ff], ['happiness', 'RESONANCE', 0xbf78ff], ['health', 'INTEGRITY', 0x7af6bd], ['energy', 'CHARGE', 0xff8fcf]] as const;
     meterDefs.forEach(([key, label, color], index) => {
@@ -78,6 +80,7 @@ export class UIScene extends Phaser.Scene {
   private layout = () => {
     const { width, height } = this.scale; const portrait = width < 650;
     this.topPanel.setSize(width, 58);
+    this.topAccent.setSize(width, 2);
     this.resourcesText.setPosition(width - 18, 14); this.populationText.setPosition(width - 18, 35);
     this.objectiveText.setPosition(portrait ? 12 : width / 2, 68).setOrigin(portrait ? 0 : 0.5, 0);
     this.creaturePanel.setPosition(portrait ? width / 2 : 158, portrait ? height - 240 : height - 166).setScale(portrait ? 0.88 : 1);
@@ -109,7 +112,7 @@ export class UIScene extends Phaser.Scene {
   private renderCreature(creature: CreatureState) {
     this.creatureName.setText(creature.name); this.creatureStatus.setText(creature.alive ? `${creature.task.toUpperCase()} · GEN ${creature.generation}` : 'SILENT').setColor(creature.alive ? '#678779' : '#ff735f');
     Object.entries(creature.needs).forEach(([key, value]) => {
-      const view = this.meters.get(key); if (view) view.fill.width = view.width * value / 100;
+      const view = this.meters.get(key); if (view) view.target = view.width * value / 100;
     });
     this.careButtons.forEach((control) => control.setAlpha(creature.alive ? 1 : 0.3));
   }
@@ -144,5 +147,9 @@ export class UIScene extends Phaser.Scene {
     this.toast?.destroy(); this.toast = this.add.text(this.scale.width / 2, this.scale.height - 84, message, { fontFamily: 'monospace', fontSize: '12px', color: '#071410', backgroundColor: '#7af6bd', padding: { x: 14, y: 9 } }).setOrigin(0.5).setDepth(500);
     this.tweens.add({ targets: this.toast, alpha: 0, y: this.toast.y - 18, delay: 1600, duration: 500, onComplete: () => { this.toast?.destroy(); this.toast = undefined; } });
   };
+  update(_time: number, delta: number) {
+    const smoothing = 1 - Math.exp(-Math.min(delta, 50) * 0.018);
+    this.meters.forEach((view) => { view.fill.width += (view.target - view.fill.width) * smoothing; });
+  }
   shutdown() { this.unsubscribe?.(); this.game.events.off('creature-selected', this.selectCreature, this); this.game.events.off('toast', this.showToast, this); this.game.events.off('open-dialogue', this.openDialogue, this); this.scale.off('resize', this.layout, this); }
 }
