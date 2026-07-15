@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { chooseTask, decayNeeds, reproductionReady } from '../src/simulation/creature';
 import { findPath } from '../src/simulation/pathfinding';
 import { spreadPollution, tickWorld } from '../src/simulation/simulation';
-import { createBuilding, validateBuildingPlacement } from '../src/simulation/building';
+import { buildingCapacity, buildingEffectMultiplier, buildingPollution, createBuilding, validateBuildingPlacement } from '../src/simulation/building';
 import { buildNavigationPath, isNavigationBlocked } from '../src/simulation/navigation';
 import { createCreaturePersonality, setBond } from '../src/simulation/personality';
+import { ROLE_SKILL, SKILL_KEYS, trainSkill } from '../src/simulation/colonyLife';
+import { advanceOfflineWorld } from '../src/simulation/offlineProgress';
+import { creatureMood, creatureVocalization } from '../src/simulation/vocalization';
 import { appendWorldEvent, createInitialWorld, makeCreature, MAX_EVENT_HISTORY } from '../src/simulation/worldState';
 import { parseWorldState } from '../src/simulation/worldSchema';
 
@@ -42,6 +45,23 @@ describe('creature simulation', () => {
     const first = createCreaturePersonality('c12', 2); const second = createCreaturePersonality('c12', 2);
     expect(first).toEqual(second);
     expect(Object.values(first).every((value) => value >= 0 && value <= 1)).toBe(true);
+  });
+  it('creates a persistent role, six skills, preferences, and an ambition', () => {
+    const first = makeCreature('c12', 500, 500); const second = makeCreature('c12', 500, 500);
+    expect(first.role).toBe(second.role);
+    expect(Object.keys(first.skills)).toEqual(SKILL_KEYS);
+    expect(first.preferences).toEqual(second.preferences);
+    expect(first.ambition.description.length).toBeGreaterThan(5);
+  });
+  it('trains a role specialty faster than ordinary practice', () => {
+    const creature = makeCreature('c3', 500, 500); const specialty = ROLE_SKILL[creature.role];
+    const before = creature.skills[specialty]; trainSkill(creature, specialty, 10);
+    expect(creature.skills[specialty] - before).toBeCloseTo(4.42);
+  });
+  it('uses original mood-based click vocabulary', () => {
+    const creature = makeCreature('c4', 500, 500); creature.needs.hunger = 20;
+    expect(creatureMood(creature)).toBe('hungry');
+    expect(creatureVocalization(creature, 1).text.length).toBeGreaterThan(2);
   });
   it('forms bonds during social time', () => {
     const world = createInitialWorld(1); const friend = makeCreature('c2', 540, 500);
@@ -129,6 +149,24 @@ describe('environment and navigation', () => {
     expect(targets.every(Boolean)).toBe(true);
     expect(targets.every((target) => target && !isNavigationBlocked(target, next.buildings))).toBe(true);
   });
+  it('reserves distinct service stations and queues overflow visitors', () => {
+    const world = createInitialWorld(1); const loom = createBuilding('nutrient-bed', 700, 500, 1); world.buildings.push(loom);
+    world.creatures = Array.from({ length: 5 }, (_, index) => makeCreature(`c${index + 1}`, 620 + index * 8, 650));
+    world.creatures.forEach((creature) => { creature.needs.hunger = 10; });
+    const next = tickWorld(world, 0.2); const visitors = next.creatures.filter((creature) => creature.destinationBuildingId === loom.id);
+    expect(new Set(visitors.map((creature) => creature.queueIndex)).size).toBe(5);
+    expect(visitors.filter((creature) => creature.isBeingServed)).toHaveLength(buildingCapacity(loom));
+    expect(new Set(visitors.map((creature) => `${Math.round(creature.target.x)},${Math.round(creature.target.y)}`)).size).toBe(5);
+  });
+  it('upgrades every facility with more capacity and stronger or cleaner output', () => {
+    (['nutrient-bed', 'wash-pool', 'resonance-garden', 'nest', 'extractor', 'clinic'] as const).forEach((kind) => {
+      const building = createBuilding(kind, 500, 500, 1); const baseCapacity = buildingCapacity(building); const basePollution = buildingPollution(building);
+      building.level = 2;
+      expect(buildingCapacity(building)).toBe(baseCapacity + 1);
+      expect(buildingEffectMultiplier(building)).toBeGreaterThan(1);
+      expect(buildingPollution(building)).toBeLessThanOrEqual(basePollution);
+    });
+  });
 });
 
 describe('state integrity', () => {
@@ -148,17 +186,29 @@ describe('state integrity', () => {
     for (const creature of legacy.creatures) {
       delete creature.personality; delete creature.bonds; delete creature.navigationPath; delete creature.socialCooldown; delete creature.socialTimer;
       delete creature.socialPursuitTimer; delete creature.socialTarget; delete creature.stuckTimer;
+      delete creature.role; delete creature.skills; delete creature.preferences; delete creature.ambition; delete creature.queueIndex; delete creature.isBeingServed;
     }
     const migrated = parseWorldState(legacy);
     expect(migrated?.creatures[0].personality).toBeDefined();
     expect(migrated?.creatures[0].navigationPath).toEqual([]);
     expect(migrated?.creatures[0].socialPursuitTimer).toBe(0);
     expect(migrated?.creatures[0].stuckTimer).toBe(0);
+    expect(migrated?.creatures[0].role).toBeDefined();
+    expect(migrated?.creatures[0].skills).toBeDefined();
   });
   it('keeps relationship state bounded', () => {
     const creature = createInitialWorld(1).creatures[0];
     for (let index = 2; index <= 14; index++) setBond(creature, `c${index}`, index);
     expect(Object.keys(creature.bonds)).toHaveLength(8);
     expect(Math.min(...Object.values(creature.bonds))).toBe(7);
+  });
+  it('simulates a bounded, safe offline interval and returns a summary', () => {
+    const world = createInitialWorld(1); world.buildings.push(createBuilding('nutrient-bed', 760, 560, 1)); world.creatures[0].needs = { hunger: 0, hygiene: 0, happiness: 0, health: 1, energy: 0 };
+    const result = advanceOfflineWorld(world, 3600);
+    expect(result.summary?.simulatedSeconds).toBe(900);
+    expect(result.summary?.births).toBeLessThanOrEqual(3);
+    expect(result.state.creatures[0].alive).toBe(true);
+    expect(result.summary?.protectedLuma).toBe(1);
+    expect(result.summary?.livingAtEnd).toBeGreaterThanOrEqual(1);
   });
 });

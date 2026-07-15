@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
-import { BUILDINGS } from '../simulation/building';
+import { BUILDINGS, buildingCapacity, buildingDisplayName } from '../simulation/building';
 import { personalityLabels } from '../simulation/personality';
+import { creatureVocalization, voicePitch, type CreatureMood } from '../simulation/vocalization';
 import type { BuildingKind, BuildingState, CreatureState, WorldState } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
 import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
@@ -45,6 +46,9 @@ export class WorldScene extends Phaser.Scene {
   private ambientMotes: AmbientMote[] = [];
   private pollutionSignature = '';
   private audioContext?: AudioContext;
+  private vocalBubbleUntil = new Map<string, number>();
+  private vocalBubbleText = new Map<string, string>();
+  private voiceClickCount = new Map<string, number>();
 
   constructor() { super('WorldScene'); }
   create() {
@@ -63,6 +67,11 @@ export class WorldScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
     this.scene.launch('UIScene');
     this.scene.launch('GlitchOverlayScene');
+    const offlineSummary = this.registry.get('offline-summary');
+    if (offlineSummary) {
+      this.registry.remove('offline-summary');
+      this.time.delayedCall(950, () => this.scene.launch('AwaySummaryScene', offlineSummary));
+    }
     this.time.delayedCall(700, () => this.game.events.emit('open-dialogue', 'awakening'));
   }
   private baseZoom() { return Phaser.Math.Clamp(Math.max(this.scale.width / WORLD_WIDTH, this.scale.height / WORLD_HEIGHT), 0.55, 1.25); }
@@ -187,14 +196,26 @@ export class WorldScene extends Phaser.Scene {
     const thoughtText = crisp(this.add.text(0, 0, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#2c2417', backgroundColor: '#fff3c4', padding: { x: 7, y: 4 }, align: 'center' })).setOrigin(0.5);
     const thought = this.add.container(0, -69, [thoughtTail, thoughtText]).setVisible(false);
     const container = this.add.container(creature.x, creature.y, [shadow, actor, label, thought]).setSize(82, 110).setDepth(10).setInteractive({ useHandCursor: true });
+    const view: CreatureView = { container, actor, shadow, aura, selection, body, eyes, status, label, thought, thoughtText, lastAlive: creature.alive, visualSignature: '' };
     container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.getDistance() < 8) { this.selectedId = creature.id; this.syncState(this.state); this.game.events.emit('creature-selected', this.state.creatures.find((c) => c.id === creature.id)); this.soundPulse(520, 80); }
+      if (pointer.getDistance() < 8) {
+        const current = this.state.creatures.find((c) => c.id === creature.id); if (!current) return;
+        this.selectedId = creature.id;
+        const variant = (this.voiceClickCount.get(creature.id) ?? 0) + 1; this.voiceClickCount.set(creature.id, variant);
+        const voice = creatureVocalization(current, variant);
+        this.vocalBubbleText.set(creature.id, voice.text); this.vocalBubbleUntil.set(creature.id, this.time.now + 1900);
+        this.playCreatureVoice(current, voice.mood, variant);
+        this.tweens.killTweensOf(view.actor); this.tweens.add({ targets: view.actor, y: -9, scaleX: 1.08, scaleY: 0.94, duration: 105, yoyo: true, ease: 'Sine.easeOut' });
+        this.syncState(this.state); this.game.events.emit('creature-selected', current);
+      }
     });
-    return { container, actor, shadow, aura, selection, body, eyes, status, label, thought, thoughtText, lastAlive: creature.alive, visualSignature: '' };
+    return view;
   }
   private thoughtFor(creature: CreatureState): string {
     if (!creature.alive) return '…';
     const partner = creature.destinationCreatureId ? this.creaturesById.get(creature.destinationCreatureId) : undefined;
+    const destination = creature.destinationBuildingId ? this.state.buildings.find((building) => building.id === creature.destinationBuildingId) : undefined;
+    if (destination && !creature.isBeingServed) return `Waiting at ${buildingDisplayName(destination)} · #${creature.queueIndex - buildingCapacity(destination) + 1}`;
     if (creature.task === 'socialize') return creature.socialTimer > 0 ? `Sharing light with ${partner?.name ?? 'a friend'} ♡` : `Finding ${partner?.name ?? 'company'} ♡`;
     if (creature.task === 'comfort') return `Helping ${partner?.name ?? 'someone'} +`;
     if (creature.task === 'eat') return this.state.buildings.some((building) => building.kind === 'nutrient-bed') ? 'Seeking nourishment' : 'I need a Dew Loom';
@@ -207,6 +228,12 @@ export class WorldScene extends Phaser.Scene {
     return dominant === 'CURIOUS' ? 'What lies beyond the trees?' : dominant === 'WARM' ? 'Is anyone lonely?' : dominant === 'SOCIAL' ? 'I hope someone visits' : dominant === 'STEADY' ? 'One task at a time' : 'I can endure this';
   }
   private updateThought(view: CreatureView, creature: CreatureState) {
+    const vocalizing = (this.vocalBubbleUntil.get(creature.id) ?? 0) > this.time.now;
+    if (vocalizing) {
+      view.thought.setVisible(creature.alive);
+      view.thoughtText.setText(this.vocalBubbleText.get(creature.id) ?? 'Hey!');
+      return;
+    }
     const serial = Number(creature.id.replace(/\D/g, '')) || 1;
     const urgent = Math.min(creature.needs.hunger, creature.needs.hygiene, creature.needs.happiness, creature.needs.health, creature.needs.energy) < 30;
     const social = creature.task === 'socialize' || creature.task === 'comfort';
@@ -305,8 +332,13 @@ export class WorldScene extends Phaser.Scene {
     }
     const core = this.add.rectangle(0, 3, 7, 7, def.color, 0.95).setBlendMode(Phaser.BlendModes.ADD);
     const glyph = crisp(this.add.text(33, -24, def.glyph, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: Phaser.Display.Color.IntegerToColor(def.color).rgba, backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
-    const name = crisp(this.add.text(0, 50, def.name.toUpperCase(), { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#fff0ba', backgroundColor: '#382918ee', padding: { x: 7, y: 4 } })).setOrigin(0.5);
-    const container = this.add.container(building.x, building.y, [shadow, halo, art, core, glyph, name]).setDepth(7);
+    if (building.level >= 2) art.fillStyle(def.color, 0.9).fillRect(-36, -38, 9, 9).fillRect(27, -38, 9, 9).fillStyle(0xfff0ba, 0.9).fillRect(-33, -35, 3, 3).fillRect(30, -35, 3, 3);
+    const level = crisp(this.add.text(-34, -27, building.level >= 2 ? 'Ⅱ' : 'Ⅰ', { fontFamily: DISPLAY_FONT, fontSize: '11px', color: '#fff0ba', backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
+    const name = crisp(this.add.text(0, 50, buildingDisplayName(building).toUpperCase(), { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#fff0ba', backgroundColor: '#382918ee', padding: { x: 7, y: 4 } })).setOrigin(0.5);
+    const container = this.add.container(building.x, building.y, [shadow, halo, art, core, glyph, level, name]).setDepth(7).setSize(120, 104).setInteractive({ useHandCursor: true }).setData('level', building.level);
+    container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.getDistance() < 8 && !this.placementKind) this.game.events.emit('building-selected', this.state.buildings.find((candidate) => candidate.id === building.id));
+    });
     this.tweens.add({ targets: [core, halo], alpha: { from: 0.35, to: 0.9 }, scale: { from: 0.88, to: 1.12 }, duration: 1200 + (building.id.charCodeAt(1) % 5) * 110, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     return container;
   }
@@ -323,7 +355,11 @@ export class WorldScene extends Phaser.Scene {
       view.lastAlive = creature.alive;
       this.drawCreature(view, creature);
     });
-    state.buildings.forEach((building) => { if (!this.buildingViews.has(building.id)) this.buildingViews.set(building.id, this.createBuildingView(building)); });
+    state.buildings.forEach((building) => {
+      const existing = this.buildingViews.get(building.id);
+      if (existing && existing.getData('level') !== building.level) { existing.destroy(); this.buildingViews.delete(building.id); }
+      if (!this.buildingViews.has(building.id)) this.buildingViews.set(building.id, this.createBuildingView(building));
+    });
     this.drawPollution(state);
   }
   private drawRelationships() {
@@ -370,6 +406,30 @@ export class WorldScene extends Phaser.Scene {
       oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(frequency, context.currentTime); oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.35, context.currentTime + duration / 1000);
       gain.gain.setValueAtTime(0.055, context.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + duration / 1000);
       oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + duration / 1000);
+    } catch { /* audio is optional */ }
+  }
+  private playCreatureVoice(creature: CreatureState, mood: CreatureMood, variant: number) {
+    try {
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const context = this.audioContext ?? new AudioContextClass(); this.audioContext = context;
+      if (context.state === 'suspended') void context.resume();
+      const base = voicePitch(creature) * (mood === 'tired' ? 0.76 : mood === 'unwell' ? 0.82 : mood === 'bright' ? 1.08 : 1);
+      const syllables = mood === 'tired' || mood === 'unwell' ? 2 : 3;
+      const output = context.createGain(); output.gain.setValueAtTime(0.0001, context.currentTime); output.connect(context.destination);
+      for (let index = 0; index < syllables; index++) {
+        const start = context.currentTime + index * 0.105;
+        const duration = 0.09 + (variant + index) % 3 * 0.018;
+        const direction = mood === 'lonely' || mood === 'hungry' ? -1 : index % 2 === 0 ? 1 : -0.4;
+        const pitch = base * (1 + ((variant * 3 + index * 2) % 7 - 3) * 0.035);
+        const oscillator = context.createOscillator(); const formant = context.createBiquadFilter(); const envelope = context.createGain();
+        oscillator.type = index % 2 === 0 ? 'triangle' : 'sine';
+        oscillator.frequency.setValueAtTime(pitch, start); oscillator.frequency.exponentialRampToValueAtTime(Math.max(120, pitch * (1 + direction * 0.18)), start + duration);
+        formant.type = 'bandpass'; formant.frequency.value = 850 + creature.personality.curiosity * 500; formant.Q.value = 1.2;
+        envelope.gain.setValueAtTime(0.0001, start); envelope.gain.exponentialRampToValueAtTime(0.16, start + 0.012); envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+        oscillator.connect(formant).connect(envelope).connect(output); oscillator.start(start); oscillator.stop(start + duration + 0.01);
+      }
+      output.gain.exponentialRampToValueAtTime(0.055, context.currentTime + 0.015);
+      output.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + syllables * 0.105 + 0.12);
     } catch { /* audio is optional */ }
   }
   update(time: number, delta: number) {

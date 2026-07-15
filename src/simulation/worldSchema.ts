@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createCreaturePersonality } from './personality';
+import { ensureCreatureLife } from './colonyLife';
 import type { WorldState } from './worldState';
 import { MAX_EVENT_HISTORY } from './worldState';
 
@@ -7,6 +8,14 @@ const finite = z.number().finite();
 const vec2 = z.object({ x: finite, y: finite });
 const needs = z.object({ hunger: finite, hygiene: finite, happiness: finite, health: finite, energy: finite });
 const creaturePersonality = z.object({ sociability: finite.min(0).max(1), curiosity: finite.min(0).max(1), diligence: finite.min(0).max(1), empathy: finite.min(0).max(1), resilience: finite.min(0).max(1) });
+const skillKey = z.enum(['foraging', 'caregiving', 'healing', 'building', 'research', 'exploration']);
+const role = z.enum(['forager', 'caretaker', 'healer', 'builder', 'researcher', 'explorer']);
+const skills = z.object({ foraging: finite.min(0).max(100), caregiving: finite.min(0).max(100), healing: finite.min(0).max(100), building: finite.min(0).max(100), research: finite.min(0).max(100), exploration: finite.min(0).max(100) });
+const preferences = z.object({
+  favoriteBuilding: z.enum(['nutrient-bed', 'wash-pool', 'resonance-garden', 'nest', 'extractor', 'clinic']),
+  favoriteActivity: z.enum(['gathering', 'caring', 'healing', 'making', 'learning', 'exploring'])
+});
+const ambition = z.object({ kind: z.enum(['master-skill', 'friendships']), skill: skillKey.optional(), progress: finite.min(0), target: finite.positive(), description: z.string().min(1).max(120) });
 const creature = z.object({
   id: z.string().min(1).max(40), name: z.string().min(1).max(80), x: finite, y: finite,
   target: vec2, destinationBuildingId: z.string().max(40).optional(), destinationCreatureId: z.string().max(40).optional(),
@@ -14,12 +23,13 @@ const creature = z.object({
   task: z.enum(['wander', 'eat', 'bathe', 'play', 'sleep', 'work', 'heal', 'socialize', 'comfort', 'dead']), age: finite,
   exposure: finite, reproduction: finite, alive: z.boolean(), deathAge: finite.optional(), generation: z.number().int().min(0), hue: finite,
   personality: creaturePersonality.optional(), bonds: z.record(finite.min(0).max(100)).optional(),
+  role: role.optional(), skills: skills.optional(), preferences: preferences.optional(), ambition: ambition.optional(),
   socialCooldown: finite.nonnegative().optional(), socialTimer: finite.nonnegative().optional(), socialPursuitTimer: finite.nonnegative().optional(),
-  socialTarget: vec2.optional(), stuckTimer: finite.nonnegative().optional()
+  socialTarget: vec2.optional(), stuckTimer: finite.nonnegative().optional(), queueIndex: z.number().int().min(0).optional(), isBeingServed: z.boolean().optional()
 });
 const building = z.object({
   id: z.string().min(1).max(40), kind: z.enum(['nutrient-bed', 'wash-pool', 'resonance-garden', 'nest', 'extractor', 'clinic']),
-  x: finite, y: finite, level: z.number().int().min(1), active: z.boolean()
+  x: finite, y: finite, level: z.number().int().min(1).max(2), active: z.boolean()
 });
 const personality = z.object({
   empathy: finite, exploitation: finite, sustainability: finite, curiosity: finite,
@@ -49,6 +59,7 @@ export function parseWorldState(value: unknown): WorldState | null {
     creatureState.socialTimer ??= 0;
     creatureState.socialPursuitTimer ??= 0;
     creatureState.stuckTimer ??= 0;
+    ensureCreatureLife(creatureState as WorldState['creatures'][number]);
   });
   const world = result.data as WorldState;
   if (world.events.length > MAX_EVENT_HISTORY) world.events = world.events.slice(-MAX_EVENT_HISTORY);
