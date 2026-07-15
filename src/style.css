@@ -1,7 +1,7 @@
-:root { color-scheme: dark; font-family: Arial, "Helvetica Neue", sans-serif; background: #04100b; color: #e9fff5; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+:root { color-scheme: dark; font-family: Arial, "Helvetica Neue", sans-serif; background: #171b0d; color: #fff7d0; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 * { box-sizing: border-box; }
 html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
-body { background: radial-gradient(circle at 50% 25%, #173d2d 0%, #081710 44%, #030806 82%); touch-action: none; }
+body { background: radial-gradient(circle at 50% 25%, #607b2a 0%, #253216 52%, #15190c 100%); touch-action: none; }
 canvas { display: block; width: 100% !important; height: 100% !important; image-rendering: auto; }
 #app { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 #rotate-hint { display: none; position: fixed; z-index: 10; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom)); transform: translateX(-50%); color: #7af6bd; background: #071410dd; border: 1px solid #315a49; border-radius: 999px; padding: 8px 14px; font-size: 11px; pointer-events: none; }

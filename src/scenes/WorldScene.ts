@@ -18,7 +18,7 @@ interface CreatureView {
   visualSignature: string;
 }
 
-interface AmbientMote { node: Phaser.GameObjects.Arc; originX: number; originY: number; phase: number; speed: number }
+interface AmbientMote { node: Phaser.GameObjects.Rectangle; originX: number; originY: number; phase: number; speed: number }
 
 const WORLD_WIDTH = 1600;
 const WORLD_HEIGHT = 1000;
@@ -36,7 +36,7 @@ export class WorldScene extends Phaser.Scene {
   private placementKind?: BuildingKind;
   private placementGhost?: Phaser.GameObjects.Container;
   private lastPinchDistance = 0;
-  private effectPool: Phaser.GameObjects.Arc[] = [];
+  private effectPool: Phaser.GameObjects.Rectangle[] = [];
   private ambientMotes: AmbientMote[] = [];
   private pollutionSignature = '';
 
@@ -46,7 +46,7 @@ export class WorldScene extends Phaser.Scene {
     this.drawHabitat();
     this.pollutionGraphics = this.add.graphics().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
     this.configureInput();
-    for (let i = 0; i < 24; i++) this.effectPool.push(this.add.circle(0, 0, 3, 0x7af6bd, 0).setDepth(18));
+    for (let i = 0; i < 24; i++) this.effectPool.push(this.add.rectangle(0, 0, 5, 5, 0x7af6bd, 0).setDepth(18));
     this.unsubscribe = gameStore.subscribe((state) => { this.state = state; this.syncState(state); });
     this.game.events.on('care', this.handleCare, this);
     this.game.events.on('build-select', this.handleBuildSelect, this);
@@ -59,47 +59,18 @@ export class WorldScene extends Phaser.Scene {
   }
   private baseZoom() { return Phaser.Math.Clamp(Math.max(this.scale.width / WORLD_WIDTH, this.scale.height / WORLD_HEIGHT), 0.55, 1.25); }
   private drawHabitat() {
-    const background = this.add.graphics().setDepth(0);
-    background.fillGradientStyle(0x0d251b, 0x071710, 0x10271f, 0x06100c, 1).fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-
-    const islands = [
-      { x: 300, y: 280, w: 430, h: 250, color: 0x173d2d },
-      { x: 840, y: 600, w: 650, h: 350, color: 0x12392d },
-      { x: 1320, y: 250, w: 370, h: 230, color: 0x1b352c },
-      { x: 1320, y: 820, w: 400, h: 200, color: 0x152f28 }
-    ];
-    islands.forEach((island, index) => {
-      background.fillStyle(0x7af6bd, 0.025).fillEllipse(island.x, island.y, island.w + 90, island.h + 80);
-      background.fillStyle(island.color, 0.7).fillEllipse(island.x, island.y, island.w, island.h);
-      background.lineStyle(2, index % 2 ? 0x315a49 : 0x285f46, 0.38).strokeEllipse(island.x, island.y, island.w, island.h);
-      background.lineStyle(1, 0x7af6bd, 0.12).strokeEllipse(island.x, island.y, island.w - 42, island.h - 34);
-    });
-
-    background.lineStyle(2, 0x4da77b, 0.16);
-    const paths = [
-      [[110, 620], [350, 520], [610, 610], [850, 470], [1110, 560], [1490, 440]],
-      [[220, 160], [470, 260], [700, 210], [960, 340], [1260, 250], [1480, 330]]
-    ];
-    paths.forEach((points) => {
-      background.beginPath().moveTo(points[0][0], points[0][1]);
-      points.slice(1).forEach(([x, y]) => background.lineTo(x, y));
-      background.strokePath();
-    });
-
-    background.lineStyle(1, 0x315a49, 0.15);
-    for (let x = 0; x <= WORLD_WIDTH; x += 100) background.lineBetween(x, 0, x, WORLD_HEIGHT);
-    for (let y = 0; y <= WORLD_HEIGHT; y += 100) background.lineBetween(0, y, WORLD_WIDTH, y);
-    background.lineStyle(3, 0x4b8f6f, 0.5).strokeRoundedRect(28, 28, WORLD_WIDTH - 56, WORLD_HEIGHT - 56, 42);
-    background.lineStyle(1, 0x7af6bd, 0.13).strokeRoundedRect(40, 40, WORLD_WIDTH - 80, WORLD_HEIGHT - 80, 34);
+    this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'habitat-pixel-map').setDisplaySize(WORLD_WIDTH, WORLD_HEIGHT).setDepth(0);
+    const frame = this.add.graphics().setDepth(1);
+    frame.lineStyle(5, 0x3a2918, 0.75).strokeRect(6, 6, WORLD_WIDTH - 12, WORLD_HEIGHT - 12);
+    frame.lineStyle(2, 0xc9aa64, 0.35).strokeRect(13, 13, WORLD_WIDTH - 26, WORLD_HEIGHT - 26);
 
     for (let i = 0; i < 44; i++) {
       const originX = (i * 197 + 47) % WORLD_WIDTH;
       const originY = (i * 83 + 131) % WORLD_HEIGHT;
-      const node = this.add.circle(originX, originY, 1 + (i % 3), i % 7 === 0 ? 0xd69aff : 0x88ffd0, 0.16 + (i % 4) * 0.04).setDepth(3).setBlendMode(Phaser.BlendModes.ADD);
+      const node = this.add.rectangle(originX, originY, 2 + (i % 2) * 2, 2 + (i % 2) * 2, i % 7 === 0 ? 0xd8b6ff : 0xa9ffcf, 0.2 + (i % 4) * 0.04).setDepth(3).setBlendMode(Phaser.BlendModes.ADD);
       this.ambientMotes.push({ node, originX, originY, phase: i * 0.73, speed: 0.35 + (i % 5) * 0.08 });
     }
-    crisp(this.add.text(64, 58, 'HABITAT 483  ·  LUMEN FIELD ONLINE', { fontFamily: DISPLAY_FONT, fontSize: '13px', color: '#72b895', letterSpacing: 1.2 })).setDepth(3);
-    crisp(this.add.text(WORLD_WIDTH - 64, 58, 'LOCAL TIME / CONTINUOUS WHILE OBSERVED', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#63997e', letterSpacing: 0.5 })).setOrigin(1, 0).setDepth(3);
+    crisp(this.add.text(52, 42, 'HABITAT 483  ·  LUMEN FIELD', { fontFamily: DISPLAY_FONT, fontSize: '13px', color: '#fff1ba', backgroundColor: '#3a2918cc', padding: { x: 9, y: 5 }, letterSpacing: 1 })).setDepth(3);
   }
   private configureInput() {
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -163,13 +134,13 @@ export class WorldScene extends Phaser.Scene {
     this.placementGhost = this.add.container(800, 500, [base, glyph]).setDepth(20);
   };
   private createCreatureView(creature: CreatureState): CreatureView {
-    const shadow = this.add.ellipse(0, 28, 54, 17, 0x000000, 0.32);
-    const aura = this.add.circle(0, 0, 38, Phaser.Display.Color.HSVToRGB(creature.hue / 360, 0.52, 0.96).color, 0.12).setBlendMode(Phaser.BlendModes.ADD);
-    const selection = this.add.circle(0, 0, 35, 0x000000, 0).setStrokeStyle(2, 0x7af6bd, 0);
+    const shadow = this.add.ellipse(2, 29, 48, 13, 0x18200e, 0.48);
+    const aura = this.add.circle(0, 0, 34, Phaser.Display.Color.HSVToRGB(creature.hue / 360, 0.52, 0.96).color, 0.1).setBlendMode(Phaser.BlendModes.ADD);
+    const selection = this.add.circle(0, 0, 34, 0x000000, 0).setStrokeStyle(3, 0xffec9c, 0);
     const body = this.add.graphics(); const eyes = this.add.graphics();
     const status = crisp(this.add.text(29, -34, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: '#071410', backgroundColor: '#f7bd62', padding: { x: 4, y: 2 } })).setOrigin(0.5).setVisible(false);
     const actor = this.add.container(0, 0, [aura, selection, body, eyes, status]);
-    const label = crisp(this.add.text(0, 44, creature.name, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#d9f5e7', backgroundColor: '#06100cf0', padding: { x: 7, y: 4 } })).setOrigin(0.5).setStroke('#06100c', 1);
+    const label = crisp(this.add.text(0, 45, creature.name, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#fff1ba', backgroundColor: '#352816e8', padding: { x: 7, y: 4 } })).setOrigin(0.5).setStroke('#20170d', 1);
     const container = this.add.container(creature.x, creature.y, [shadow, actor, label]).setSize(82, 98).setDepth(10).setInteractive({ useHandCursor: true });
     container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (pointer.getDistance() < 8) { this.selectedId = creature.id; this.syncState(this.state); this.game.events.emit('creature-selected', this.state.creatures.find((c) => c.id === creature.id)); this.soundPulse(520, 80); }
@@ -184,59 +155,85 @@ export class WorldScene extends Phaser.Scene {
     const signature = [creature.alive, sick, tired, sad, dirty, hungry, selected].join(':');
     const labelText = creature.alive ? `${creature.name}  ·  ${creature.task.toUpperCase()}` : `${creature.name}  ·  SILENT`;
     if (view.label.text !== labelText) view.label.setText(labelText);
-    view.label.setColor(selected ? '#a6ffcf' : '#b5d9c8');
+    view.label.setColor(selected ? '#fff4a8' : '#f4e2ae');
     if (view.visualSignature === signature) return;
     view.visualSignature = signature;
     const light = Phaser.Display.Color.ValueToColor(color).clone().lighten(24).color;
     const dark = Phaser.Display.Color.ValueToColor(color).clone().darken(38).color;
     view.body.clear(); view.eyes.clear();
-    view.selection.setStrokeStyle(selected ? 2 : 1, selected ? 0xa6ffcf : color, selected ? 0.85 : 0.16).setScale(selected ? 1 : 0.92);
-    view.aura.setFillStyle(color, creature.alive ? (selected ? 0.2 : 0.11) : 0.035);
+    view.selection.setStrokeStyle(selected ? 3 : 1, selected ? 0xffec9c : color, selected ? 0.95 : 0.12).setScale(selected ? 1 : 0.92);
+    view.aura.setFillStyle(color, creature.alive ? (selected ? 0.16 : 0.07) : 0.025);
     if (creature.alive) {
-      view.body.fillStyle(dark, 0.52).fillEllipse(0, 5, 57, 62);
-      view.body.fillStyle(color, 1).fillEllipse(0, 0, 54, 62);
-      view.body.fillTriangle(-20, -20, -10, -42, -2, -24).fillTriangle(20, -20, 10, -42, 2, -24);
-      view.body.lineStyle(2, light, 0.55).strokeEllipse(0, 0, 51, 59);
-      view.body.fillStyle(light, 0.26).fillEllipse(-11, -13, 20, 25);
-      view.body.fillStyle(0xffffff, 0.3).fillCircle(-14, -18, 4);
-      view.body.fillStyle(light, 0.18).fillEllipse(0, 16, 33, 21);
+      view.body.fillStyle(dark, 1)
+        .fillRect(-16, -34, 8, 10).fillRect(8, -34, 8, 10)
+        .fillRect(-20, -28, 40, 6).fillRect(-24, -22, 48, 36)
+        .fillRect(-20, 14, 40, 10).fillRect(-14, 24, 28, 5);
+      view.body.fillStyle(color, 1)
+        .fillRect(-12, -30, 5, 9).fillRect(7, -30, 5, 9)
+        .fillRect(-16, -24, 32, 7).fillRect(-20, -17, 40, 29)
+        .fillRect(-16, 12, 32, 8).fillRect(-10, 20, 20, 4);
+      view.body.fillStyle(light, 0.82).fillRect(-16, -18, 7, 22).fillRect(-12, -22, 12, 5).fillRect(-9, 12, 18, 5);
+      view.body.fillStyle(dark, 0.8).fillRect(-18, 20, 8, 5).fillRect(10, 20, 8, 5);
     } else {
-      view.body.fillStyle(0x26352e, 0.78).fillEllipse(0, 18, 62, 25).lineStyle(2, 0x758a7e, 0.4).strokeEllipse(0, 18, 62, 25);
-      view.body.lineStyle(2, 0xb1c0b7, 0.42).lineBetween(-13, 10, -6, 17).lineBetween(-6, 10, -13, 17).lineBetween(6, 10, 13, 17).lineBetween(13, 10, 6, 17);
+      view.body.fillStyle(0x273021, 1).fillRect(-26, 11, 52, 14).fillRect(-19, 7, 38, 22);
+      view.body.fillStyle(0x64705c, 1).fillRect(-16, 10, 32, 13).fillRect(-22, 15, 44, 7);
     }
     view.eyes.clear().fillStyle(0x06100c, 1);
-    if (creature.alive && tired) { view.eyes.lineStyle(3, 0x06100c).lineBetween(-14, -4, -6, -4).lineBetween(6, -4, 14, -4); }
+    if (creature.alive && tired) { view.eyes.fillRect(-14, -5, 9, 3).fillRect(5, -5, 9, 3); }
     else if (creature.alive) {
-      view.eyes.fillEllipse(-10, -4, 7, sad ? 6 : 12).fillEllipse(10, -4, 7, sad ? 6 : 12);
-      if (!sad) view.eyes.fillStyle(0xffffff, 0.8).fillCircle(-11, -7, 1.5).fillCircle(9, -7, 1.5);
+      view.eyes.fillRect(-14, -8, 7, sad ? 5 : 10).fillRect(7, -8, 7, sad ? 5 : 10);
+      if (!sad) view.eyes.fillStyle(0xffffff, 0.9).fillRect(-13, -7, 2, 2).fillRect(8, -7, 2, 2);
     }
     if (creature.alive) {
-      view.eyes.lineStyle(2, 0x06100c);
-      if (sad) view.eyes.beginPath().arc(0, 15, 7, Math.PI, 0, false).strokePath(); else view.eyes.beginPath().arc(0, 9, 7, 0, Math.PI, false).strokePath();
-      if (!sad && n.happiness > 72) view.eyes.fillStyle(0xffb0c8, 0.32).fillEllipse(-18, 8, 8, 4).fillEllipse(18, 8, 8, 4);
-      if (dirty) view.eyes.fillStyle(0x6f653f, 0.9).fillCircle(-23, 14, 4).fillCircle(21, -17, 3).fillCircle(16, 22, 2);
-      if (hungry) view.eyes.lineStyle(2, 0xf7bd62, 0.85).strokeCircle(0, 10, 10);
+      view.eyes.fillStyle(0x06100c, 1);
+      if (sad) view.eyes.fillRect(-6, 10, 12, 3).fillRect(-8, 13, 3, 3).fillRect(5, 13, 3, 3);
+      else view.eyes.fillRect(-7, 9, 3, 3).fillRect(-4, 12, 8, 3).fillRect(4, 9, 3, 3);
+      if (!sad && n.happiness > 72) view.eyes.fillStyle(0xffb0c8, 0.55).fillRect(-20, 7, 6, 3).fillRect(14, 7, 6, 3);
+      if (dirty) view.eyes.fillStyle(0x5f542d, 1).fillRect(-22, 12, 5, 5).fillRect(18, -16, 4, 4).fillRect(14, 19, 3, 3);
+      if (hungry) view.eyes.fillStyle(0xffd56b, 1).fillRect(-7, 17, 14, 3).fillRect(-10, 14, 3, 3).fillRect(7, 14, 3, 3);
+    } else {
+      view.eyes.fillStyle(0x25301f, 1).fillRect(-13, 14, 9, 3).fillRect(-10, 11, 3, 9).fillRect(4, 14, 9, 3).fillRect(7, 11, 3, 9);
     }
     const status = !creature.alive ? '' : sick ? '☣' : hungry ? '!' : dirty ? '≋' : sad ? '·' : tired ? 'z' : '';
     view.status.setText(status).setVisible(Boolean(status)).setBackgroundColor(sick ? '#ff735f' : hungry ? '#f7bd62' : dirty ? '#65c7ff' : '#bf78ff');
   }
   private createBuildingView(building: BuildingState) {
     const def = BUILDINGS[building.kind];
-    const shadow = this.add.ellipse(0, 28, 112, 30, 0x000000, 0.38);
-    const halo = this.add.circle(0, -2, 54, def.color, 0.09).setBlendMode(Phaser.BlendModes.ADD);
+    const shadow = this.add.ellipse(4, 30, 92, 22, 0x1d2411, 0.52);
+    const halo = this.add.rectangle(0, 0, 76, 62, def.color, 0.07).setBlendMode(Phaser.BlendModes.ADD);
     const art = this.add.graphics();
-    art.fillStyle(0x081510, 0.98).fillEllipse(0, 22, 108, 35).lineStyle(2, def.color, 0.55).strokeEllipse(0, 22, 108, 35);
-    art.fillStyle(def.color, 0.16).fillRoundedRect(-47, -25, 94, 53, 14).lineStyle(2, def.color, 0.72).strokeRoundedRect(-47, -25, 94, 53, 14);
-    art.fillStyle(0x0a1b14, 0.96).fillRoundedRect(-38, -17, 76, 37, 10);
-    if (building.kind === 'nutrient-bed') art.lineStyle(3, def.color, 0.75).lineBetween(-22, 10, -12, -11).lineBetween(-12, -11, 0, 11).lineBetween(0, 11, 13, -12).lineBetween(13, -12, 25, 9);
-    if (building.kind === 'wash-pool') art.lineStyle(3, def.color, 0.8).beginPath().arc(0, 4, 24, Math.PI, 0, false).strokePath();
-    if (building.kind === 'resonance-garden') art.lineStyle(2, def.color, 0.8).strokeCircle(0, 2, 17).strokeCircle(0, 2, 27);
-    if (building.kind === 'nest') art.fillStyle(def.color, 0.45).fillTriangle(-24, 12, 0, -14, 24, 12).fillStyle(0x081510, 1).fillCircle(0, 6, 9);
-    if (building.kind === 'extractor') art.lineStyle(4, def.color, 0.8).lineBetween(-22, 13, 0, -14).lineBetween(0, -14, 22, 13).lineBetween(-22, 13, 22, 13);
-    if (building.kind === 'clinic') art.fillStyle(def.color, 0.75).fillRect(-4, -14, 8, 31).fillRect(-15, -3, 30, 8);
-    const core = this.add.circle(0, 2, 6, def.color, 0.92).setBlendMode(Phaser.BlendModes.ADD);
-    const glyph = crisp(this.add.text(31, -18, def.glyph, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: Phaser.Display.Color.IntegerToColor(def.color).rgba })).setOrigin(0.5);
-    const name = crisp(this.add.text(0, 49, def.name.toUpperCase(), { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#d5eee2', backgroundColor: '#06100cf0', padding: { x: 7, y: 4 } })).setOrigin(0.5);
+    art.fillStyle(0x3a2918, 1).fillRect(-46, 15, 92, 19).fillRect(-40, 9, 80, 31);
+    art.fillStyle(0x83653c, 1).fillRect(-40, 11, 80, 17).fillRect(-34, 7, 68, 25);
+    art.fillStyle(0xc7a56a, 1).fillRect(-34, 10, 68, 6);
+    if (building.kind === 'nutrient-bed') {
+      art.fillStyle(0x5b351d, 1).fillRect(-29, -15, 58, 28).fillStyle(0xa86a33, 1).fillRect(-25, -11, 50, 20);
+      art.fillStyle(0x4d8b31, 1).fillRect(-18, -25, 6, 18).fillRect(-2, -29, 6, 22).fillRect(15, -23, 6, 17);
+      art.fillStyle(0xf2cb59, 1).fillRect(-22, -26, 10, 7).fillRect(-4, -31, 10, 7).fillRect(13, -25, 10, 7);
+    }
+    if (building.kind === 'wash-pool') {
+      art.fillStyle(0x3e5d58, 1).fillRect(-31, -13, 62, 28).fillStyle(0x79d8e8, 1).fillRect(-25, -9, 50, 17);
+      art.fillStyle(0xd4f6ea, 1).fillRect(-15, -6, 12, 3).fillRect(5, 2, 15, 3);
+    }
+    if (building.kind === 'resonance-garden') {
+      art.fillStyle(0x4d3c62, 1).fillRect(-29, -10, 58, 25);
+      art.fillStyle(0xb98adf, 1).fillRect(-20, -25, 9, 28).fillRect(-4, -34, 10, 37).fillRect(13, -22, 8, 25);
+      art.fillStyle(0xf1dbff, 1).fillRect(-18, -25, 5, 6).fillRect(-2, -34, 6, 7).fillRect(15, -22, 4, 6);
+    }
+    if (building.kind === 'nest') {
+      art.fillStyle(0x684328, 1).fillRect(-29, -17, 58, 34).fillStyle(0xb8783f, 1).fillRect(-34, -21, 68, 10).fillRect(-27, -27, 54, 8);
+      art.fillStyle(0x2c2316, 1).fillRect(-9, -3, 18, 20).fillStyle(0xf0c77a, 1).fillRect(-22, -10, 8, 8).fillRect(14, -10, 8, 8);
+    }
+    if (building.kind === 'extractor') {
+      art.fillStyle(0x353b39, 1).fillRect(-28, -22, 56, 39).fillStyle(0x747b72, 1).fillRect(-20, -29, 40, 14);
+      art.fillStyle(0xff785e, 1).fillRect(-17, -18, 11, 9).fillRect(7, -18, 11, 9).fillStyle(0x1f2322, 1).fillRect(-6, -10, 12, 27);
+    }
+    if (building.kind === 'clinic') {
+      art.fillStyle(0xd9d3b8, 1).fillRect(-28, -25, 56, 42).fillStyle(0xf8ead0, 1).fillRect(-22, -19, 44, 30);
+      art.fillStyle(0xe8759f, 1).fillRect(-5, -16, 10, 24).fillRect(-13, -8, 26, 10);
+    }
+    const core = this.add.rectangle(0, 3, 7, 7, def.color, 0.95).setBlendMode(Phaser.BlendModes.ADD);
+    const glyph = crisp(this.add.text(33, -24, def.glyph, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: Phaser.Display.Color.IntegerToColor(def.color).rgba, backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
+    const name = crisp(this.add.text(0, 50, def.name.toUpperCase(), { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#fff0ba', backgroundColor: '#382918ee', padding: { x: 7, y: 4 } })).setOrigin(0.5);
     const container = this.add.container(building.x, building.y, [shadow, halo, art, core, glyph, name]).setDepth(7);
     this.tweens.add({ targets: [core, halo], alpha: { from: 0.35, to: 0.9 }, scale: { from: 0.88, to: 1.12 }, duration: 1200 + (building.id.charCodeAt(1) % 5) * 110, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     return container;
@@ -265,8 +262,12 @@ export class WorldScene extends Phaser.Scene {
     state.pollution.forEach((value, index) => {
       if (value < 1) return;
       const x = (index % state.pollutionWidth) * cw + cw / 2; const y = Math.floor(index / state.pollutionWidth) * ch + ch / 2;
-      this.pollutionGraphics.fillStyle(0xff6b4f, Math.min(0.19, value / 420)).fillCircle(x, y, cw * (0.36 + value / 150));
-      if (value > 28) this.pollutionGraphics.lineStyle(1, 0xffa06c, Math.min(0.25, value / 300)).strokeCircle(x, y, cw * (0.24 + value / 240));
+      const alpha = Math.min(0.25, value / 360);
+      this.pollutionGraphics.fillStyle(0x6d4350, alpha).fillRect(x - cw / 2, y - ch / 2, cw, ch);
+      if (value > 28) {
+        this.pollutionGraphics.fillStyle(0xb45b4f, Math.min(0.38, value / 260));
+        for (let p = 0; p < 5; p++) this.pollutionGraphics.fillRect(x - cw / 2 + ((p * 31 + index * 17) % Math.max(8, cw - 8)), y - ch / 2 + ((p * 19 + index * 29) % Math.max(8, ch - 8)), 6, 6);
+      }
     });
   }
   private soundPulse(frequency: number, duration: number) {

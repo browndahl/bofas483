@@ -44,17 +44,17 @@ export class UIScene extends Phaser.Scene {
   }
   private createHud() {
     this.topPanel = panel(this, 0, 0, 100, 58).setOrigin(0, 0).setDepth(100);
-    this.topAccent = this.add.rectangle(0, 57, 100, 2, 0x7af6bd, 0.65).setOrigin(0, 0).setDepth(101);
-    crisp(this.add.text(20, 11, 'bofas483', { fontFamily: DISPLAY_FONT, fontSize: '19px', color: '#91ffd0', letterSpacing: 2 })).setDepth(101).setName('brand');
-    this.chapterText = crisp(this.add.text(20, 36, 'CHAPTER 01 / TENDER SIGNAL', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#9bc7b2', letterSpacing: 0.5 })).setDepth(101).setName('chapter');
-    this.resourcesText = crisp(this.add.text(0, 15, '', { fontFamily: CODE_FONT, fontStyle: 'bold', fontSize: '13px', color: '#f1fff8' })).setOrigin(1, 0).setDepth(101);
-    this.populationText = crisp(this.add.text(0, 35, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#a8cdbb' })).setOrigin(1, 0).setDepth(101);
-    this.objectiveText = crisp(this.add.text(0, 0, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '12px', color: '#f1fff8', backgroundColor: '#0a2118f2', padding: { x: 14, y: 10 }, wordWrap: { width: 330 }, lineSpacing: 4 })).setDepth(101).setStroke('#071410', 1);
+    this.topAccent = this.add.rectangle(0, 57, 100, 3, 0xd7b86f, 0.8).setOrigin(0, 0).setDepth(101);
+    crisp(this.add.text(20, 11, 'bofas483', { fontFamily: DISPLAY_FONT, fontSize: '19px', color: '#fff0a8', letterSpacing: 2 })).setDepth(101).setName('brand');
+    this.chapterText = crisp(this.add.text(20, 36, 'CHAPTER 01 / TENDER SIGNAL', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#d8c69a', letterSpacing: 0.5 })).setDepth(101).setName('chapter');
+    this.resourcesText = crisp(this.add.text(0, 15, '', { fontFamily: CODE_FONT, fontStyle: 'bold', fontSize: '13px', color: '#fff2bc' })).setOrigin(1, 0).setDepth(101);
+    this.populationText = crisp(this.add.text(0, 35, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#d6c59b' })).setOrigin(1, 0).setDepth(101);
+    this.objectiveText = crisp(this.add.text(0, 0, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '12px', color: '#fff7d5', backgroundColor: '#3a2e1ff2', padding: { x: 14, y: 10 }, wordWrap: { width: 330 }, lineSpacing: 4 })).setDepth(101).setStroke('#1f180f', 1);
 
     this.creaturePanel = this.add.container(0, 0).setDepth(110);
     this.creaturePanel.add(panel(this, 0, 0, 280, 294));
-    this.creatureName = crisp(this.add.text(-120, -124, 'PIP-01', { fontFamily: DISPLAY_FONT, fontSize: '16px', color: '#91ffd0', letterSpacing: 0.7 }));
-    this.creatureStatus = crisp(this.add.text(120, -122, 'ALIVE', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#9bc7b2' })).setOrigin(1, 0);
+    this.creatureName = crisp(this.add.text(-120, -124, 'PIP-01', { fontFamily: DISPLAY_FONT, fontSize: '16px', color: '#fff0a8', letterSpacing: 0.7 }));
+    this.creatureStatus = crisp(this.add.text(120, -122, 'ALIVE', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#d8c69a' })).setOrigin(1, 0);
     this.creaturePanel.add([this.creatureName, this.creatureStatus]);
     const meterDefs = [['hunger', 'NOURISHMENT', 0xf7bd62], ['hygiene', 'CLARITY', 0x65c7ff], ['happiness', 'RESONANCE', 0xbf78ff], ['health', 'INTEGRITY', 0x7af6bd], ['energy', 'CHARGE', 0xff8fcf]] as const;
     meterDefs.forEach(([key, label, color], index) => {

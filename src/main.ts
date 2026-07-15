@@ -27,7 +27,7 @@ const game = new Phaser.Game({
   backgroundColor: '#050b09',
   transparent: false,
   scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH, width: window.innerWidth, height: window.innerHeight },
-  render: { antialias: true, pixelArt: false, roundPixels: false },
+  render: { antialias: false, pixelArt: true, roundPixels: true },
   input: { activePointers: 3 },
   dom: { createContainer: true },
   scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene, GuideScene]
