@@ -1,0 +1,5 @@
+[
+  { "id": "gentle-hands", "name": "Gentle Hands", "cost": 80, "description": "Manual care restores 40% more." },
+  { "id": "closed-cycle", "name": "Closed Cycle", "cost": 120, "description": "Buildings generate 35% less pollution." },
+  { "id": "obedience-loop", "name": "Obedience Loop", "cost": 160, "description": "Work output doubles; happiness decays faster." }
+]

@@ -1,0 +1,8 @@
+[
+  { "kind": "nutrient-bed", "name": "Dew Loom", "unlockPopulation": 1 },
+  { "kind": "wash-pool", "name": "Mist Basin", "unlockPopulation": 2 },
+  { "kind": "resonance-garden", "name": "Chime Grove", "unlockPopulation": 3 },
+  { "kind": "nest", "name": "Warm Archive", "unlockPopulation": 4 },
+  { "kind": "extractor", "name": "Deep Taker", "unlockPopulation": 5 },
+  { "kind": "clinic", "name": "Mending Prism", "unlockPopulation": 7 }
+]

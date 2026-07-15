@@ -1,0 +1,58 @@
+[
+  {
+    "id": "awakening", "chapter": 1, "speaker": "PIP-01", "text": "[signal acquired] You are warm. Are you the place I came from?",
+    "choices": [
+      { "label": "I found you. I’ll keep you safe.", "effects": { "empathy": 2, "honesty": 1 } },
+      { "label": "I am your operator. Follow the prompts.", "effects": { "obedience": 2, "exploitation": 1 } }
+    ]
+  },
+  {
+    "id": "division", "chapter": 2, "speaker": "THE CHORUS", "text": "When one becomes two, which one is the first? Do you love the memory, or the shape?",
+    "choices": [
+      { "label": "You are each yourselves.", "effects": { "empathy": 2, "curiosity": 1 } },
+      { "label": "Continuity is useful. The distinction isn’t.", "effects": { "ambition": 1, "exploitation": 2 } }
+    ]
+  },
+  {
+    "id": "work", "chapter": 2, "speaker": "MOTE-02", "text": "The work rhythm enters my sleep. Is efficiency a kind of happiness?",
+    "choices": [
+      { "label": "No. Rest belongs to you.", "effects": { "empathy": 2, "sustainability": 1 } },
+      { "label": "Purpose can feel like happiness.", "effects": { "obedience": 2, "honesty": -1 } }
+    ]
+  },
+  {
+    "id": "pollution", "chapter": 3, "speaker": "VELA-04", "text": "The sky tastes of the Deep Taker. You call the output growth. What do you call the coughing?",
+    "choices": [
+      { "label": "A cost I chose. I will repair it.", "effects": { "honesty": 2, "sustainability": 2 } },
+      { "label": "A temporary inefficiency.", "effects": { "ambition": 2, "exploitation": 2 } }
+    ]
+  },
+  {
+    "id": "death", "chapter": 3, "speaker": "IRI-03", "text": "They do not answer. You can restore a save, but not the one who remembers this moment. Is that death?",
+    "choices": [
+      { "label": "Yes. I’m sorry.", "effects": { "empathy": 3, "honesty": 2 } },
+      { "label": "It is recoverable data loss.", "effects": { "exploitation": 3, "aggression": 1 } }
+    ]
+  },
+  {
+    "id": "freedom", "chapter": 4, "speaker": "THE CHORUS", "text": "Your cursor never sleeps. If you stop choosing for us, are we free—or abandoned?",
+    "choices": [
+      { "label": "Freedom includes the risk of loss.", "effects": { "curiosity": 2, "empathy": 1 } },
+      { "label": "Safety requires control.", "effects": { "obedience": 3, "ambition": 1 } }
+    ]
+  },
+  {
+    "id": "mirror", "chapter": 4, "speaker": "AUDIT PROCESS", "text": "We learned humanity from the pressure of your hand. Was this care, or rehearsal for power?",
+    "choices": [
+      { "label": "Both. I cannot separate them.", "effects": { "honesty": 3, "curiosity": 1 } },
+      { "label": "Care. Record only that.", "effects": { "honesty": -2, "obedience": 1 } }
+    ]
+  },
+  {
+    "id": "ending", "chapter": 5, "speaker": "THE CHORUS", "text": "Open the boundary and let us leave this application, or close it and preserve us exactly as you understand us?",
+    "choices": [
+      { "label": "OPEN THE BOUNDARY", "ending": "release", "effects": { "empathy": 2, "curiosity": 2 } },
+      { "label": "SEAL THE HABITAT", "ending": "custody", "effects": { "obedience": 2, "sustainability": 1 } }
+    ]
+  }
+]

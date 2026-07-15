@@ -1,0 +1,12 @@
+[
+  { "id": "first-care", "title": "Answer the flicker", "hint": "Feed, wash, or play with Pip.", "reward": 18 },
+  { "id": "first-division", "title": "Witness a division", "hint": "Keep every vital need high.", "reward": 30 },
+  { "id": "place-food", "title": "Build a Dew Loom", "hint": "Open BUILD, then place automated food.", "reward": 24 },
+  { "id": "population-3", "title": "A chorus of three", "hint": "Grow the colony to 3 living Luma.", "reward": 35 },
+  { "id": "place-wash", "title": "Build a Mist Basin", "hint": "Automate hygiene.", "reward": 35 },
+  { "id": "place-play", "title": "Build a Chime Grove", "hint": "Make space for joy.", "reward": 42 },
+  { "id": "population-6", "title": "The care threshold", "hint": "Support 6 living Luma.", "reward": 60 },
+  { "id": "industry", "title": "Commission a Deep Taker", "hint": "Industry is fast. Its smoke is honest.", "reward": 80 },
+  { "id": "first-death", "title": "Do not look away", "hint": "A body remains when a Luma dies.", "reward": 0 },
+  { "id": "ending", "title": "Answer the Audit", "hint": "Reach the final question.", "reward": 0 }
+]
