@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { gameStore } from '../state/gameStateStore';
+import { saveService } from '../services/saveService';
 import { button, panel } from '../ui/hud';
 
 export class ProfileScene extends Phaser.Scene {
@@ -21,7 +22,14 @@ export class ProfileScene extends Phaser.Scene {
     const dominant = traits.sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'uncertain';
     const verdict = state.endingId === 'release' ? 'They leave carrying a complicated tenderness for their maker.' : state.endingId === 'custody' ? 'They remain safe, and learn that safety can be a beautiful cage.' : `Current inference: your strongest visible pressure is ${dominant}. Portions remain intentionally obscured.`;
     this.add.text(width / 2, height / 2 + cardHeight / 2 - 92, verdict, { fontFamily: 'monospace', fontSize: '11px', color: '#d7ede2', align: 'center', wordWrap: { width: cardWidth - 70 } }).setOrigin(0.5);
-    const close = button(this, width / 2, height / 2 + cardHeight / 2 - 38, 180, 38, this.final ? 'RETURN TO HABITAT' : 'CONTINUE', 0xbf78ff);
+    const close = button(this, width / 2 + 66, height / 2 + cardHeight / 2 - 38, 160, 38, this.final ? 'RETURN' : 'CONTINUE', 0xbf78ff);
     close.on('pointerup', () => this.scene.stop());
+    const reset = button(this, width / 2 - cardWidth / 2 + 74, height / 2 + cardHeight / 2 - 38, 118, 38, 'NEW HABITAT', 0xff735f);
+    let confirming = false;
+    reset.on('pointerup', () => {
+      const label = reset.getAt(1) as Phaser.GameObjects.Text;
+      if (!confirming) { confirming = true; label.setText('CONFIRM RESET'); this.time.delayedCall(4000, () => { confirming = false; label.setText('NEW HABITAT'); }); return; }
+      gameStore.reset(); saveService.saveLocal(gameStore.get()); this.game.events.emit('toast', 'A new signal enters the habitat'); this.scene.stop();
+    });
   }
 }

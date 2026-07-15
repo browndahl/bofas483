@@ -154,6 +154,10 @@ export class WorldScene extends Phaser.Scene {
     return this.add.container(building.x, building.y, [shadow, base, inner, glyph, name]).setDepth(7);
   }
   private syncState(state: WorldState) {
+    const creatureIds = new Set(state.creatures.map((creature) => creature.id));
+    this.views.forEach((view, id) => { if (!creatureIds.has(id)) { view.container.destroy(); this.views.delete(id); } });
+    const buildingIds = new Set(state.buildings.map((building) => building.id));
+    this.buildingViews.forEach((view, id) => { if (!buildingIds.has(id)) { view.destroy(); this.buildingViews.delete(id); } });
     state.creatures.forEach((creature) => {
       let view = this.views.get(creature.id);
       if (!view) { view = this.createCreatureView(creature); this.views.set(creature.id, view); }
