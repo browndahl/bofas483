@@ -51,6 +51,16 @@ alter table public.save_games enable row level security;
 alter table public.event_log enable row level security;
 alter table public.leaderboard enable row level security;
 
+-- This project is created with "Automatically expose new tables" disabled.
+-- Grant only the API surface the browser actually needs; Edge Functions use
+-- service_role for all validated state mutations.
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update on public.profiles to authenticated;
+grant select on public.save_games, public.event_log to authenticated;
+grant select on public.leaderboard to anon, authenticated;
+grant all privileges on public.profiles, public.save_games, public.event_log, public.leaderboard to service_role;
+grant usage, select on all sequences in schema public to service_role;
+
 create policy "profiles select own" on public.profiles for select using (auth.uid() = id);
 create policy "profiles insert own" on public.profiles for insert with check (auth.uid() = id);
 create policy "profiles update own" on public.profiles for update using (auth.uid() = id) with check (auth.uid() = id);
@@ -61,7 +71,6 @@ create policy "leaderboard public read" on public.leaderboard for select using (
 revoke insert, update, delete on public.save_games from anon, authenticated;
 revoke insert, update, delete on public.event_log from anon, authenticated;
 revoke insert, update, delete on public.leaderboard from anon, authenticated;
-grant select on public.leaderboard to anon, authenticated;
 
 create or replace function public.handle_new_user() returns trigger language plpgsql security definer set search_path = public as $$
 begin
