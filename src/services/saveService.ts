@@ -1,13 +1,22 @@
 import type { WorldState } from '../simulation/worldState';
 import { authService } from './authService';
 import { supabase } from './supabaseClient';
+import { parseWorldState } from '../simulation/worldSchema';
 
 const LOCAL_KEY = 'bofas483.save.v1';
 
 export const saveService = {
-  saveLocal(state: WorldState) { localStorage.setItem(LOCAL_KEY, JSON.stringify(state)); },
+  saveLocal(state: WorldState): boolean {
+    try { localStorage.setItem(LOCAL_KEY, JSON.stringify({ savedAt: Date.now(), state })); return true; }
+    catch { return false; }
+  },
   loadLocal(): WorldState | null {
-    try { const value = localStorage.getItem(LOCAL_KEY); return value ? JSON.parse(value) as WorldState : null; } catch { return null; }
+    try {
+      const value = localStorage.getItem(LOCAL_KEY); if (!value) return null;
+      const parsed = JSON.parse(value) as unknown;
+      const candidate = parsed && typeof parsed === 'object' && 'state' in parsed ? (parsed as { state: unknown }).state : parsed;
+      return parseWorldState(candidate);
+    } catch { return null; }
   },
   async saveCloud(state: WorldState, slot = 1) {
     if (!supabase) { this.saveLocal(state); return { local: true }; }
@@ -26,6 +35,6 @@ export const saveService = {
     if (!supabase) return this.loadLocal();
     const user = await authService.currentUser(); if (!user) return this.loadLocal();
     const { data, error } = await supabase.from('save_games').select('world_state').eq('user_id', user.id).eq('slot', slot).maybeSingle();
-    if (error) throw error; return (data?.world_state as WorldState | undefined) ?? this.loadLocal();
+    if (error) throw error; return parseWorldState(data?.world_state) ?? this.loadLocal();
   }
 };

@@ -9,6 +9,7 @@ import { DialogueScene } from './scenes/DialogueScene';
 import { ProfileScene } from './scenes/ProfileScene';
 import { GlitchOverlayScene } from './scenes/GlitchOverlayScene';
 import { AuthScene } from './scenes/AuthScene';
+import { GuideScene } from './scenes/GuideScene';
 import { gameStore } from './state/gameStateStore';
 import { saveService } from './services/saveService';
 import './style.css';
@@ -26,18 +27,22 @@ const game = new Phaser.Game({
   backgroundColor: '#050b09',
   transparent: false,
   scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH, width: window.innerWidth, height: window.innerHeight },
-  render: { antialias: true, pixelArt: false, roundPixels: false },
+  render: { antialias: false, pixelArt: true, roundPixels: true, powerPreference: 'high-performance' },
+  fps: { target: 60, min: 30, smoothStep: true },
   input: { activePointers: 3 },
   dom: { createContainer: true },
-  scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene]
+  scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene, GuideScene]
 });
 
 const restored = saveService.loadLocal();
 if (restored?.version === 1) gameStore.set(restored);
 gameStore.start();
 
-window.setInterval(() => saveService.saveLocal(gameStore.get()), 15_000);
-window.addEventListener('beforeunload', () => saveService.saveLocal(gameStore.get()));
+const autosave = window.setInterval(() => saveService.saveLocal(gameStore.get()), 15_000);
+window.addEventListener('pagehide', (event) => {
+  saveService.saveLocal(gameStore.get());
+  if (!event.persisted) { window.clearInterval(autosave); gameStore.stop(); }
+});
 
 if (import.meta.env.DEV) {
   (window as Window & { game?: Phaser.Game; gameStore?: typeof gameStore }).game = game;
