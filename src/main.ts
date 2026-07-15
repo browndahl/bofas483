@@ -10,6 +10,7 @@ import { ProfileScene } from './scenes/ProfileScene';
 import { GlitchOverlayScene } from './scenes/GlitchOverlayScene';
 import { AuthScene } from './scenes/AuthScene';
 import { GuideScene } from './scenes/GuideScene';
+import { AwaySummaryScene } from './scenes/AwaySummaryScene';
 import { gameStore } from './state/gameStateStore';
 import { saveService } from './services/saveService';
 import './style.css';
@@ -31,11 +32,13 @@ const game = new Phaser.Game({
   fps: { target: 60, min: 30, smoothStep: true },
   input: { activePointers: 3 },
   dom: { createContainer: true },
-  scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene, GuideScene]
+  scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene, GuideScene, AwaySummaryScene]
 });
 
-const restored = saveService.loadLocal();
+const restored = saveService.loadLocalWithProgress();
 if (restored?.version === 1) gameStore.set(restored);
+const offlineSummary = saveService.consumeOfflineSummary();
+if (offlineSummary) game.registry.set('offline-summary', offlineSummary);
 gameStore.start();
 
 const autosave = window.setInterval(() => saveService.saveLocal(gameStore.get()), 15_000);

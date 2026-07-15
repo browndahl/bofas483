@@ -1,12 +1,20 @@
 import { createCreaturePersonality, setBond } from './personality';
+import { chooseCreatureRole, createCreatureAmbition, createCreaturePreferences, createCreatureSkills } from './colonyLife';
 
 export type NeedKey = 'hunger' | 'hygiene' | 'happiness' | 'health' | 'energy';
 export type TaskType = 'wander' | 'eat' | 'bathe' | 'play' | 'sleep' | 'work' | 'heal' | 'socialize' | 'comfort' | 'dead';
 export type BuildingKind = 'nutrient-bed' | 'wash-pool' | 'resonance-garden' | 'nest' | 'extractor' | 'clinic';
+export type CreatureRole = 'forager' | 'caretaker' | 'healer' | 'builder' | 'researcher' | 'explorer';
+export type SkillKey = 'foraging' | 'caregiving' | 'healing' | 'building' | 'research' | 'exploration';
+export type CreatureSkills = Record<SkillKey, number>;
+export type PreferenceActivity = 'gathering' | 'caring' | 'healing' | 'making' | 'learning' | 'exploring';
+export type AmbitionKind = 'master-skill' | 'friendships';
 
 export interface Vec2 { x: number; y: number }
 export interface Needs { hunger: number; hygiene: number; happiness: number; health: number; energy: number }
 export interface CreaturePersonality { sociability: number; curiosity: number; diligence: number; empathy: number; resilience: number }
+export interface CreaturePreferences { favoriteBuilding: BuildingKind; favoriteActivity: PreferenceActivity }
+export interface CreatureAmbition { kind: AmbitionKind; skill?: SkillKey; progress: number; target: number; description: string }
 export interface CreatureState {
   id: string;
   name: string;
@@ -27,12 +35,18 @@ export interface CreatureState {
   generation: number;
   hue: number;
   personality: CreaturePersonality;
+  role: CreatureRole;
+  skills: CreatureSkills;
+  preferences: CreaturePreferences;
+  ambition: CreatureAmbition;
   bonds: Record<string, number>;
   socialCooldown: number;
   socialTimer: number;
   socialPursuitTimer: number;
   socialTarget?: Vec2;
   stuckTimer: number;
+  queueIndex: number;
+  isBeingServed: boolean;
 }
 export interface BuildingState {
   id: string;
@@ -87,6 +101,8 @@ const names = ['Pip', 'Mote', 'Iri', 'Nim', 'Vela', 'Odo', 'Rua', 'Kip', 'Sola',
 export function makeCreature(id: string, x: number, y: number, generation = 0, parentPersonality?: CreaturePersonality): CreatureState {
   const serial = Number(id.replace(/\D/g, '')) || 1;
   const index = serial - 1;
+  const personality = createCreaturePersonality(id, generation, parentPersonality);
+  const role = chooseCreatureRole(personality, id);
   return {
     id,
     name: `${names[index % names.length]}-${serial.toString(16).toUpperCase().padStart(2, '0')}`,
@@ -102,12 +118,18 @@ export function makeCreature(id: string, x: number, y: number, generation = 0, p
     alive: true,
     generation,
     hue: 145 + (index * 23) % 70,
-    personality: createCreaturePersonality(id, generation, parentPersonality),
+    personality,
+    role,
+    skills: createCreatureSkills(id),
+    preferences: createCreaturePreferences(role, id),
+    ambition: createCreatureAmbition(role, id),
     bonds: {},
     socialCooldown: 5 + index % 8,
     socialTimer: 0,
     socialPursuitTimer: 0,
-    stuckTimer: 0
+    stuckTimer: 0,
+    queueIndex: 0,
+    isBeingServed: false
   };
 }
 

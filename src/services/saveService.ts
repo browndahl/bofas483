@@ -2,8 +2,10 @@ import type { WorldState } from '../simulation/worldState';
 import { authService } from './authService';
 import { supabase } from './supabaseClient';
 import { parseWorldState } from '../simulation/worldSchema';
+import { advanceOfflineWorld, type OfflineSummary } from '../simulation/offlineProgress';
 
 const LOCAL_KEY = 'bofas483.save.v1';
+let pendingOfflineSummary: OfflineSummary | undefined;
 
 export const saveService = {
   saveLocal(state: WorldState): boolean {
@@ -17,6 +19,21 @@ export const saveService = {
       const candidate = parsed && typeof parsed === 'object' && 'state' in parsed ? (parsed as { state: unknown }).state : parsed;
       return parseWorldState(candidate);
     } catch { return null; }
+  },
+  loadLocalWithProgress(): WorldState | null {
+    try {
+      const value = localStorage.getItem(LOCAL_KEY); if (!value) return null;
+      const parsed = JSON.parse(value) as unknown;
+      const wrapped = parsed && typeof parsed === 'object' && 'state' in parsed ? parsed as { savedAt?: unknown; state: unknown } : { state: parsed };
+      const state = parseWorldState(wrapped.state); if (!state) return null;
+      const savedAt = typeof wrapped.savedAt === 'number' && Number.isFinite(wrapped.savedAt) ? wrapped.savedAt : Date.now();
+      const advanced = advanceOfflineWorld(state, Math.max(0, (Date.now() - savedAt) / 1000));
+      pendingOfflineSummary = advanced.summary;
+      return advanced.state;
+    } catch { return null; }
+  },
+  consumeOfflineSummary() {
+    const summary = pendingOfflineSummary; pendingOfflineSummary = undefined; return summary;
   },
   async saveCloud(state: WorldState, slot = 1) {
     if (!supabase) { this.saveLocal(state); return { local: true }; }

@@ -1,5 +1,6 @@
-import { BUILDINGS, taskBuilding } from './building';
+import { buildingCapacity, buildingEffectMultiplier, buildingPollution, buildingStation, taskBuilding } from './building';
 import { advanceReproduction, chooseTask, decayNeeds, divideCreature } from './creature';
+import { skillEfficiency, skillForTask, trainSkill } from './colonyLife';
 import { buildNavigationPath, findSocialMeeting, isNavigationBlocked } from './navigation';
 import { setBond, socialCompatibility } from './personality';
 import { resolveObjectiveProgress } from './progression';
@@ -14,16 +15,56 @@ const MAX_SOCIAL_PURSUIT = 8;
 const STUCK_REPATH_SECONDS = 2.2;
 
 interface SocialPlan { partnerId: string; task: 'socialize' | 'comfort'; target: Vec2 }
+interface ServiceAssignment { building: BuildingState; queueIndex: number; target: Vec2; serving: boolean }
 
-function nearestBuilding(creature: CreatureState, buildings: BuildingState[]): BuildingState | undefined {
-  let nearest: BuildingState | undefined;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-  for (const building of buildings) {
-    const dx = building.x - creature.x; const dy = building.y - creature.y;
-    const distance = dx * dx + dy * dy;
-    if (distance < nearestDistance) { nearest = building; nearestDistance = distance; }
+function taskUrgency(creature: CreatureState, task: TaskType) {
+  if (task === 'heal') return 220 - creature.needs.health;
+  if (task === 'eat') return 180 - creature.needs.hunger;
+  if (task === 'bathe') return 150 - creature.needs.hygiene;
+  if (task === 'sleep') return 140 - creature.needs.energy;
+  if (task === 'play') return 120 - creature.needs.happiness;
+  return 20 + creature.personality.diligence * 10;
+}
+
+function openStation(building: BuildingState, queueIndex: number, buildings: BuildingState[]) {
+  const requested = buildingStation(building, queueIndex);
+  const dx = requested.x - building.x; const dy = requested.y - building.y;
+  const candidates = [requested, { x: building.x - dy, y: building.y + dx }, { x: building.x + dy, y: building.y - dx }, { x: building.x - dx, y: building.y - dy }];
+  return candidates.find((candidate) => !isNavigationBlocked(candidate, buildings, building.id)) ?? requested;
+}
+
+function buildServiceAssignments(creatures: CreatureState[], tasks: Map<string, TaskType>, buildingsByKind: Map<BuildingKind, BuildingState[]>, buildings: BuildingState[]) {
+  const assignments = new Map<string, ServiceAssignment>();
+  const loads = new Map<string, number>();
+  const waiting = creatures.filter((creature) => creature.alive && taskBuilding[tasks.get(creature.id) ?? 'wander'])
+    .sort((a, b) => taskUrgency(b, tasks.get(b.id) ?? 'wander') - taskUrgency(a, tasks.get(a.id) ?? 'wander') || a.id.localeCompare(b.id));
+  for (const creature of waiting) {
+    const kind = taskBuilding[tasks.get(creature.id) ?? 'wander'];
+    const candidates = kind ? buildingsByKind.get(kind) ?? [] : [];
+    let chosen: BuildingState | undefined; let bestScore = Number.POSITIVE_INFINITY;
+    for (const building of candidates) {
+      const load = loads.get(building.id) ?? 0;
+      const distance = Math.hypot(building.x - creature.x, building.y - creature.y);
+      const queuePressure = load / buildingCapacity(building) * 230;
+      const preferenceBonus = creature.preferences.favoriteBuilding === building.kind ? 42 : 0;
+      const score = distance + queuePressure - preferenceBonus;
+      if (score < bestScore) { bestScore = score; chosen = building; }
+    }
+    if (!chosen) continue;
+    const queueIndex = loads.get(chosen.id) ?? 0;
+    loads.set(chosen.id, queueIndex + 1);
+    assignments.set(creature.id, { building: chosen, queueIndex, target: openStation(chosen, queueIndex, buildings), serving: queueIndex < buildingCapacity(chosen) });
   }
-  return nearest;
+  return assignments;
+}
+
+function trainAndCelebrate(world: WorldState, creature: CreatureState, task: TaskType, seconds: number, multiplier = 1) {
+  const skill = skillForTask(task); if (!skill) return;
+  const previous = creature.ambition.progress;
+  trainSkill(creature, skill, seconds, multiplier);
+  if (previous < creature.ambition.target && creature.ambition.progress >= creature.ambition.target) {
+    appendWorldEvent(world, { type: 'ambition_complete', at: world.time, payload: { creatureId: creature.id, ambition: creature.ambition.description } });
+  }
 }
 
 function clearSocialState(creature: CreatureState, cooldown = 0) {
@@ -203,6 +244,8 @@ function applySocialInteractions(world: WorldState, seconds: number) {
       actor.needs.happiness = Math.min(100, actor.needs.happiness + restoration);
       partner.needs.happiness = Math.min(100, partner.needs.happiness + restoration);
     }
+    trainAndCelebrate(world, actor, actor.task, seconds, 1.2);
+    trainAndCelebrate(world, partner, partner.task, seconds, 1.2);
     const crossed = [20, 50, 80].find((threshold) => previousBond < threshold && nextBond >= threshold);
     if (crossed) appendWorldEvent(world, { type: 'social_bond', at: world.time, payload: { a: actor.id, b: partner.id, strength: crossed, kind: comforting ? 'comfort' : 'friendship' } });
   }
@@ -235,7 +278,7 @@ function pollutionAt(world: WorldState, x: number, y: number): number {
 export function tickWorld(world: WorldState, seconds: number): WorldState {
   const next = structuredClone(world);
   next.time += seconds;
-  const sources = next.buildings.map((building) => ({ x: building.x, y: building.y, amount: BUILDINGS[building.kind].pollution }));
+  const sources = next.buildings.map((building) => ({ x: building.x, y: building.y, amount: buildingPollution(building) }));
   next.pollution = spreadPollution(next.pollution, next.pollutionWidth, next.pollutionHeight, sources, seconds);
   const buildingsByKind = new Map<BuildingKind, BuildingState[]>();
   next.buildings.forEach((building) => {
@@ -262,15 +305,19 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
   });
 
   const socialPlans = buildSocialPlans(next.creatures, next.buildings, next.time);
+  const taskPlans = new Map(next.creatures.filter((creature) => creature.alive).map((creature) => [creature.id, socialPlans.get(creature.id)?.task ?? chooseTask(creature, next.buildings)]));
+  const serviceAssignments = buildServiceAssignments(next.creatures, taskPlans, buildingsByKind, next.buildings);
   const socialGrid = new SpatialGrid<CreatureState>(128); socialGrid.rebuild(next.creatures.filter((creature) => creature.alive));
   const newborns: CreatureState[] = [];
   next.creatures = next.creatures.map((creature) => {
     if (!creature.alive) return creature;
     const socialPlan = socialPlans.get(creature.id);
-    const task = socialPlan?.task ?? chooseTask(creature, next.buildings);
+    const task = taskPlans.get(creature.id) ?? chooseTask(creature, next.buildings);
     creature.task = task;
-    const kind = taskBuilding[task];
-    const building = kind ? nearestBuilding(creature, buildingsByKind.get(kind) ?? []) : undefined;
+    const service = serviceAssignments.get(creature.id);
+    const building = service?.building;
+    creature.queueIndex = service?.queueIndex ?? 0;
+    creature.isBeingServed = service?.serving ?? false;
 
     if (socialPlan) {
       creature.destinationBuildingId = undefined;
@@ -278,10 +325,10 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
       creature.socialCooldown = 0;
       creature.socialTarget = { ...socialPlan.target };
       creature.target = { ...socialPlan.target };
-    } else if (building) {
+    } else if (service) {
       if (creature.destinationCreatureId || SOCIAL_TASKS.has(creature.task) || creature.socialTarget) clearSocialState(creature);
-      creature.destinationBuildingId = building.id; creature.destinationCreatureId = undefined;
-      creature.target = { x: building.x, y: building.y + 38 };
+      creature.destinationBuildingId = service.building.id; creature.destinationCreatureId = undefined;
+      creature.target = { ...service.target };
     } else {
       if (creature.destinationCreatureId || SOCIAL_TASKS.has(creature.task) || creature.socialTarget) clearSocialState(creature);
       creature.destinationBuildingId = undefined; creature.destinationCreatureId = undefined;
@@ -295,6 +342,7 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
     }
 
     const movement = moveCreature(creature, next.buildings, socialGrid.nearby(creature.x, creature.y, 48), seconds);
+    if (task === 'wander' && movement.moved > 0.35) trainAndCelebrate(next, creature, task, seconds, 0.45);
     if (movement.remaining > 14 && movement.moved < 0.35) creature.stuckTimer += seconds;
     else if (movement.moved >= 0.35 || movement.remaining <= 14) creature.stuckTimer = 0;
     if (socialPlan && creature.socialTimer <= 0) creature.socialPursuitTimer += seconds;
@@ -304,13 +352,17 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
       else if (task === 'wander') creature.target = { x: creature.x, y: creature.y };
     }
     const destinationDistance = Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y);
-    if (building && destinationDistance < 10) {
-      if (task === 'eat') creature.needs.hunger = Math.min(100, creature.needs.hunger + 16 * seconds);
-      if (task === 'bathe') creature.needs.hygiene = Math.min(100, creature.needs.hygiene + 19 * seconds);
-      if (task === 'play') creature.needs.happiness = Math.min(100, creature.needs.happiness + 14 * seconds);
-      if (task === 'sleep') creature.needs.energy = Math.min(100, creature.needs.energy + 20 * seconds);
-      if (task === 'heal') { creature.needs.health = Math.min(100, creature.needs.health + 8 * seconds); creature.exposure = Math.max(0, creature.exposure - 5 * seconds); }
-      if (task === 'work') { next.resources.alloy += 0.8 * seconds; next.resources.glow += 0.35 * seconds; creature.needs.happiness = Math.max(0, creature.needs.happiness - 0.9 * seconds); }
+    if (building && service?.serving && destinationDistance < 12) {
+      const skill = skillForTask(task);
+      const preference = creature.preferences.favoriteBuilding === building.kind ? 1.05 : 1;
+      const efficiency = buildingEffectMultiplier(building) * preference * (skill ? skillEfficiency(creature, skill) : 1);
+      if (task === 'eat') creature.needs.hunger = Math.min(100, creature.needs.hunger + 16 * efficiency * seconds);
+      if (task === 'bathe') creature.needs.hygiene = Math.min(100, creature.needs.hygiene + 19 * efficiency * seconds);
+      if (task === 'play') creature.needs.happiness = Math.min(100, creature.needs.happiness + 14 * efficiency * seconds);
+      if (task === 'sleep') creature.needs.energy = Math.min(100, creature.needs.energy + 20 * efficiency * seconds);
+      if (task === 'heal') { creature.needs.health = Math.min(100, creature.needs.health + 8 * efficiency * seconds); creature.exposure = Math.max(0, creature.exposure - 5 * efficiency * seconds); }
+      if (task === 'work') { next.resources.alloy += 0.8 * efficiency * seconds; next.resources.glow += 0.35 * efficiency * seconds; creature.needs.happiness = Math.max(0, creature.needs.happiness - 0.9 * seconds); }
+      trainAndCelebrate(next, creature, task, seconds, building.level >= 2 ? 1.12 : 1);
     }
     if (creature.reproduction >= 100 && next.creatures.length + newborns.length < 250) newborns.push(divideCreature(creature, next));
     return creature;

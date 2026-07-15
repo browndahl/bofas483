@@ -1,4 +1,4 @@
-import { BUILDINGS, canAfford, createBuilding, validateBuildingPlacement } from '../simulation/building';
+import { BUILDINGS, canAfford, canAffordUpgrade, createBuilding, validateBuildingPlacement } from '../simulation/building';
 import type { BuildingKind, CreatureState, NeedKey, WorldState } from '../simulation/worldState';
 import { appendWorldEvent, createInitialWorld } from '../simulation/worldState';
 
@@ -46,6 +46,18 @@ class GameStateStore {
     next.profile.ambition += kind === 'extractor' ? 2 : 0.5;
     next.profile.sustainability += BUILDINGS[kind].pollution === 0 ? 0.5 : -1;
     appendWorldEvent(next, { type: 'place_building', at: next.time, payload: { kind, x, y } });
+    this.set(next); return true;
+  }
+  upgradeBuilding(id: string) {
+    const next = structuredClone(this.state);
+    const building = next.buildings.find((candidate) => candidate.id === id);
+    if (!building || !canAffordUpgrade(next.resources, building)) return false;
+    const cost = BUILDINGS[building.kind].upgrade.cost;
+    next.resources.glow -= cost.glow; next.resources.alloy -= cost.alloy;
+    building.level = 2;
+    next.profile.ambition += 1;
+    next.profile.sustainability += building.kind === 'extractor' ? 0.6 : 0.25;
+    appendWorldEvent(next, { type: 'upgrade_building', at: next.time, payload: { id: building.id, kind: building.kind, level: building.level } });
     this.set(next); return true;
   }
   canPlace(kind: BuildingKind, x: number, y: number) {
