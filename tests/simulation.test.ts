@@ -3,7 +3,7 @@ import { chooseTask, decayNeeds, reproductionReady } from '../src/simulation/cre
 import { findPath } from '../src/simulation/pathfinding';
 import { spreadPollution, tickWorld } from '../src/simulation/simulation';
 import { createBuilding, validateBuildingPlacement } from '../src/simulation/building';
-import { buildNavigationPath } from '../src/simulation/navigation';
+import { buildNavigationPath, isNavigationBlocked } from '../src/simulation/navigation';
 import { createCreaturePersonality, setBond } from '../src/simulation/personality';
 import { appendWorldEvent, createInitialWorld, makeCreature, MAX_EVENT_HISTORY } from '../src/simulation/worldState';
 import { parseWorldState } from '../src/simulation/worldSchema';
@@ -48,7 +48,8 @@ describe('creature simulation', () => {
     world.creatures[0].x = 500; world.creatures[0].y = 500; world.creatures[0].target = { x: 500, y: 500 };
     world.creatures.push(friend);
     world.creatures.forEach((creature) => { creature.age = 10; creature.socialCooldown = 0; creature.needs.happiness = 65; });
-    const next = tickWorld(world, 0.2);
+    let next = world;
+    for (let index = 0; index < 50 && !(next.creatures[0].bonds.c2 ?? next.creatures[1].bonds.c1); index++) next = tickWorld(next, 0.2);
     expect(next.creatures.some((creature) => creature.task === 'socialize')).toBe(true);
     expect(next.creatures[0].bonds.c2 ?? next.creatures[1].bonds.c1).toBeGreaterThan(0);
   });
@@ -58,6 +59,40 @@ describe('creature simulation', () => {
     distressed.needs.happiness = 20; world.creatures.push(distressed);
     const next = tickWorld(world, 0.2);
     expect(next.creatures[0].task).toBe('comfort');
+  });
+  it('lets urgent needs interrupt an existing social pursuit', () => {
+    const world = createInitialWorld(1); const friend = makeCreature('c2', 560, 500); world.creatures.push(friend);
+    world.creatures.forEach((creature, index) => {
+      creature.age = 10; creature.socialCooldown = 0; creature.task = 'socialize';
+      creature.destinationCreatureId = index === 0 ? 'c2' : 'c1'; creature.socialTarget = { x: 500 + index * 60, y: 500 };
+    });
+    world.creatures[0].needs.energy = 20;
+    const next = tickWorld(world, 0.2);
+    expect(next.creatures[0].task).toBe('sleep');
+    expect(next.creatures[0].destinationCreatureId).toBeUndefined();
+  });
+  it('dissolves triangular pursuits into exclusive reciprocal pairs', () => {
+    const world = createInitialWorld(1);
+    world.creatures = [makeCreature('c1', 450, 500), makeCreature('c2', 520, 500), makeCreature('c3', 590, 500)];
+    const loop = ['c2', 'c3', 'c1'];
+    world.creatures.forEach((creature, index) => {
+      creature.age = 10; creature.socialCooldown = 0; creature.needs.happiness = 65;
+      creature.task = 'socialize'; creature.destinationCreatureId = loop[index];
+    });
+    const next = tickWorld(world, 0.2); const byId = new Map(next.creatures.map((creature) => [creature.id, creature]));
+    const paired = next.creatures.filter((creature) => creature.destinationCreatureId);
+    expect(paired).toHaveLength(2);
+    expect(paired.every((creature) => byId.get(creature.destinationCreatureId!)?.destinationCreatureId === creature.id)).toBe(true);
+  });
+  it('abandons a social pursuit that exceeds its deadline', () => {
+    const world = createInitialWorld(1); world.creatures.push(makeCreature('c2', 560, 500));
+    world.creatures.forEach((creature, index) => {
+      creature.age = 10; creature.socialCooldown = 0; creature.needs.happiness = 65; creature.task = 'socialize';
+      creature.destinationCreatureId = index === 0 ? 'c2' : 'c1'; creature.socialTarget = { x: 500 + index * 60, y: 500 }; creature.socialPursuitTimer = 7.9;
+    });
+    const next = tickWorld(world, 0.2);
+    expect(next.creatures.every((creature) => !creature.destinationCreatureId && creature.socialCooldown >= 8)).toBe(true);
+    expect(next.events.some((event) => event.type === 'social_path_abandoned')).toBe(true);
   });
 });
 
@@ -86,6 +121,14 @@ describe('environment and navigation', () => {
   it('rejects construction on scenic water and stone', () => {
     expect(validateBuildingPlacement([], 170, 105).ok).toBe(false);
   });
+  it('chooses open-ground social targets around structures', () => {
+    const world = createInitialWorld(1); world.buildings.push(createBuilding('nest', 500, 500, 1));
+    world.creatures = [makeCreature('c1', 390, 500), makeCreature('c2', 610, 500)];
+    world.creatures.forEach((creature) => { creature.age = 10; creature.socialCooldown = 0; creature.needs.happiness = 65; });
+    const next = tickWorld(world, 0.2); const targets = next.creatures.map((creature) => creature.socialTarget);
+    expect(targets.every(Boolean)).toBe(true);
+    expect(targets.every((target) => target && !isNavigationBlocked(target, next.buildings))).toBe(true);
+  });
 });
 
 describe('state integrity', () => {
@@ -104,10 +147,13 @@ describe('state integrity', () => {
     const legacy = structuredClone(world) as unknown as { creatures: Array<Record<string, unknown>> };
     for (const creature of legacy.creatures) {
       delete creature.personality; delete creature.bonds; delete creature.navigationPath; delete creature.socialCooldown; delete creature.socialTimer;
+      delete creature.socialPursuitTimer; delete creature.socialTarget; delete creature.stuckTimer;
     }
     const migrated = parseWorldState(legacy);
     expect(migrated?.creatures[0].personality).toBeDefined();
     expect(migrated?.creatures[0].navigationPath).toEqual([]);
+    expect(migrated?.creatures[0].socialPursuitTimer).toBe(0);
+    expect(migrated?.creatures[0].stuckTimer).toBe(0);
   });
   it('keeps relationship state bounded', () => {
     const creature = createInitialWorld(1).creatures[0];
