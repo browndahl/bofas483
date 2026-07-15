@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { RESEARCH_BRANCHES, relationshipStage } from '../simulation/livingWorld';
+import { OBJECTIVES } from '../simulation/progression';
 import { ROLE_LABELS, SKILL_KEYS, SKILL_LABELS, skillLevel } from '../simulation/colonyLife';
 import type { CreatureRole, GameSettings, ResearchBranch } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
@@ -83,15 +84,19 @@ export class ColonyScene extends Phaser.Scene {
     const living = this.state.creatures.filter((creature) => creature.alive);
     const activeAlerts = world.alerts.filter((alert) => !alert.dismissed);
     const friends = new Set(living.flatMap((creature) => Object.entries(creature.bonds).filter(([, bond]) => bond >= 35).map(([id]) => [creature.id, id].sort().join(':')))).size;
+    const guided = OBJECTIVES.filter((objective) => !objective.optional);
+    const guidedComplete = guided.filter((objective) => this.state.completedObjectives.includes(objective.id)).length;
+    const nextObjective = guided.find((objective) => !this.state.completedObjectives.includes(objective.id));
     this.addHeading(0, 0, `LEVEL ${world.level}  ·  ${world.title.toUpperCase()}`);
     this.addText(0, 28, `REPUTATION ${Math.floor(world.reputation)}  ·  DAY ${world.day} / ${world.season.toUpperCase()}  ·  ${world.weather.toUpperCase()}\nPOPULATION ${living.length}  ·  FRIENDSHIPS ${friends}  ·  REGIONS ${world.unlockedRegions.length}/5\nRARE STORES  ${world.rareResources.memoryCrystal} MEMORY CRYSTAL  ·  ${world.rareResources.wildSeed} WILD SEED`, 12, '#dff5ea', width);
-    this.addHeading(0, 112, 'ACTIVE SIGNALS', activeAlerts.some((alert) => alert.severity === 'critical') ? '#ff735f' : '#65c7ff');
-    if (!activeAlerts.length) this.addText(0, 138, 'No urgent colony alerts. The habitat is stable.', 12, '#90c9b0');
+    this.addText(0, 88, `GUIDED JOURNEY  ${guidedComplete}/${guided.length}${nextObjective ? `  ·  NEXT: ${nextObjective.title.toUpperCase()}` : '  ·  COMPLETE'}`, 10, nextObjective ? '#f7bd62' : '#7af6bd', width);
+    this.addHeading(0, 122, 'ACTIVE SIGNALS', activeAlerts.some((alert) => alert.severity === 'critical') ? '#ff735f' : '#65c7ff');
+    if (!activeAlerts.length) this.addText(0, 148, 'No urgent colony alerts. The habitat is stable.', 12, '#90c9b0');
     activeAlerts.slice(0, 4).forEach((alert, index) => {
-      const y = 142 + index * 54; this.addText(0, y, `${alert.severity === 'critical' ? '!!' : '!'}  ${alert.title.toUpperCase()}\n${alert.detail}`, 11, alert.severity === 'critical' ? '#ff9b89' : '#ffe1a0', width - 126);
+      const y = 152 + index * 54; this.addText(0, y, `${alert.severity === 'critical' ? '!!' : '!'}  ${alert.title.toUpperCase()}\n${alert.detail}`, 11, alert.severity === 'critical' ? '#ff9b89' : '#ffe1a0', width - 126);
       this.addButton(width - 55, y + 14, 104, 'DISMISS', 0x65c7ff, () => gameStore.dismissAlert(alert.id));
     });
-    const challengeY = 178 + Math.max(1, activeAlerts.slice(0, 4).length) * 54;
+    const challengeY = 188 + Math.max(1, activeAlerts.slice(0, 4).length) * 54;
     this.addHeading(0, challengeY, 'OPTIONAL CHALLENGES');
     world.challenges.forEach((challenge, index) => this.addText(0, challengeY + 27 + index * 42, `${challenge.complete ? '✓' : '◇'} ${challenge.title.toUpperCase()}  ${Math.floor(challenge.progress)}/${challenge.target}\n${challenge.description}`, 11, challenge.complete ? '#7af6bd' : '#dff5ea', width));
   }
@@ -215,8 +220,8 @@ export class ColonyScene extends Phaser.Scene {
 
   private renderChangelog() {
     const { width } = this.dimensions();
-    this.addHeading(0, 0, 'LIVING WORLD UPDATE  /  2026.07');
-    this.addText(0, 30, 'CREATURE LIFE\nOriginal positional voices, mood responses, call-and-answer, ambient chatter, baby voices, greetings, roles, six skills, ambitions, preferences, emergent traits, memories, age milestones, teaching, families, relationship stages, arguments, comfort, and personal histories.\n\nCOLONY & WORLD\nBranching facility upgrades, construction and maintenance, service reservations, smarter queues, colony reputation, five research paths, regional unlocks, rare resources, daily events, challenges, journal, day/night, seasons, mist, rain, wind, storms, ambient particles, and visible paths.\n\nPLAYER TOOLS\nColony command center, alert management, identity cards, research, activity journal, save slots, recovery backups, export/import, offline reports, pause and three speeds, photo mode, voice controls, subtitles, text scaling, contrast, color-safe indicators, reduced motion, low-power and quality settings.\n\nPRODUCTION\nSave migrations, isolated development saves, privacy-safe errors, worker telemetry, simulation stress coverage, responsive layouts, and deployment smoke checks.', 12, '#e4f7ed', width);
+    this.addHeading(0, 0, 'FIRST HOUR & RECOVERY UPDATE  /  2026.07');
+    this.addText(0, 30, 'NEW COLONY JOURNEY\nA 15-step guided opening now teaches direct care, construction, automation, division, roles, research, facility upgrades, reputation, industry, and the final Audit. Every step shows its exact reward and opens contextual help when clicked. Early rewards deliberately fund the next system.\n\nRECOVERY\nA fully silent habitat now offers a Recovery Signal that preserves buildings, research, relationships, and history; automatic backup restore; or a confirmed fresh start. Offline summaries route silent colonies directly to these options.\n\nPACING\nNeed decay is gentler, construction is faster, division has more readable timing, and healthy Luma generate useful research earlier. The first 30–60 minutes now build complexity instead of creating a care emergency.\n\nLIVING WORLD\nOriginal positional voices, roles, six skills, preferences, relationships, upgrades, queues, colony reputation, research paths, events, day/night, weather, save slots, offline reports, accessibility controls, worker telemetry, and production smoke tests remain fully integrated.', 12, '#e4f7ed', width);
   }
 
   private shutdown() { this.unsubscribe?.(); this.unsubscribe = undefined; this.scale.off('resize', this.rebuild, this); this.input.keyboard?.removeAllListeners(); }

@@ -408,7 +408,7 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
       if (task === 'heal') { creature.needs.health = Math.min(100, creature.needs.health + 8 * efficiency * careBonus * seconds); creature.exposure = Math.max(0, creature.exposure - 5 * efficiency * careBonus * seconds); }
       if (task === 'work') { next.resources.alloy += 0.8 * efficiency * seconds; next.resources.glow += 0.35 * efficiency * seconds; creature.needs.happiness = Math.max(0, creature.needs.happiness - 0.9 * seconds); }
       if (task === 'construct') {
-        const before = building.constructionProgress; building.constructionProgress = Math.min(100, building.constructionProgress + 5.2 * skillEfficiency(creature, 'building') * researchBonus(next, 'technology') * seconds);
+        const before = building.constructionProgress; building.constructionProgress = Math.min(100, building.constructionProgress + 6.5 * skillEfficiency(creature, 'building') * researchBonus(next, 'technology') * seconds);
         trainSkill(creature, 'building', seconds, 1.4);
         if (before < 100 && building.constructionProgress >= 100) { building.constructing = false; building.active = true; building.durability = 100; appendWorldEvent(next, { type: 'construction_complete', at: next.time, payload: { buildingId: building.id, kind: building.kind } }); addJournal(next, { category: 'milestone', title: `${building.kind} construction complete`, detail: `${creature.name} finished the final connection.` }); }
       }

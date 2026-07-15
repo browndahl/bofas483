@@ -2,11 +2,11 @@ import type { BuildingState, CreatureState, NeedKey, TaskType, WorldState } from
 import { connectParentAndChild, makeCreature } from './worldState';
 
 export const NEED_DECAY: Record<NeedKey, number> = {
-  hunger: 0.65,
-  hygiene: 0.32,
-  happiness: 0.28,
+  hunger: 0.18,
+  hygiene: 0.1,
+  happiness: 0.08,
   health: 0,
-  energy: 0.38
+  energy: 0.12
 };
 
 const clamp = (value: number) => Math.max(0, Math.min(100, value));
@@ -44,7 +44,7 @@ export function reproductionReady(creature: CreatureState): boolean {
 
 export function advanceReproduction(creature: CreatureState, seconds: number): CreatureState {
   const reproduction = reproductionReady(creature)
-    ? clamp(creature.reproduction + seconds * 2.4)
+    ? clamp(creature.reproduction + seconds * 1.6)
     : Math.max(0, creature.reproduction - seconds * 0.35);
   return { ...creature, reproduction };
 }
