@@ -12,7 +12,7 @@ import {
 import { advanceReproduction, chooseTask, decayNeeds, divideCreature } from './creature';
 import { skillEfficiency, skillForTask, trainSkill } from './colonyLife';
 import { addJournal, ensureBuildingLife, ensureCreatureHistory, ensureLivingWorld, remember, researchBonus, updateCreatureHistory, updateLivingWorld } from './livingWorld';
-import { buildNavigationPath, findSocialMeeting, isNavigationBlocked } from './navigation';
+import { buildNavigationPath, buildRecoveryPath, findSocialMeeting, isNavigationBlocked } from './navigation';
 import { setBond, socialCompatibility } from './personality';
 import { resolveObjectiveProgress } from './progression';
 import { SpatialGrid } from './spatialGrid';
@@ -32,6 +32,7 @@ const WORLD_HEIGHT = 1000;
 const SOCIAL_TASKS = new Set<TaskType>(['socialize', 'comfort', 'argue']);
 const MAX_SOCIAL_PURSUIT = 8;
 const STUCK_REPATH_SECONDS = 2.2;
+const PERSONAL_SPACE = 44;
 
 interface SocialPlan { partnerId: string; task: 'socialize' | 'comfort' | 'argue'; target: Vec2 }
 interface ServiceAssignment { building: BuildingState; queueIndex: number; target: Vec2; serving: boolean }
@@ -155,12 +156,22 @@ function buildSocialPlans(world: WorldState): Map<string, SocialPlan> {
   const plans = new Map<string, SocialPlan>();
   const byId = new Map(creatures.map((creature) => [creature.id, creature]));
   const reserved = new Set<string>();
+  const reservedMeetingTargets: Vec2[] = [];
   const eligible = creatures.filter((creature) => canSocialize(creature, buildings));
   const pair = (first: CreatureState, second: CreatureState, firstTask: 'socialize' | 'comfort' | 'argue', secondTask: 'socialize' | 'comfort' | 'argue' = 'socialize', firstTarget?: Vec2, secondTarget?: Vec2) => {
-    const meeting = firstTarget && secondTarget ? { first: firstTarget, second: secondTarget } : findSocialMeeting(first, second, buildings);
+    const retainedTargetsAreValid = firstTarget && secondTarget
+      && Math.hypot(firstTarget.x - secondTarget.x, firstTarget.y - secondTarget.y) >= 48
+      && Math.hypot(firstTarget.x - secondTarget.x, firstTarget.y - secondTarget.y) <= 82
+      && !isNavigationBlocked(firstTarget, buildings)
+      && !isNavigationBlocked(secondTarget, buildings)
+      && [firstTarget, secondTarget].every((target) => reservedMeetingTargets.every((reservedTarget) => Math.hypot(target.x - reservedTarget.x, target.y - reservedTarget.y) >= 86));
+    const meeting = retainedTargetsAreValid
+      ? { first: firstTarget, second: secondTarget }
+      : findSocialMeeting(first, second, buildings, reservedMeetingTargets);
     if (!meeting) return false;
     plans.set(first.id, { partnerId: second.id, task: firstTask, target: meeting.first });
     plans.set(second.id, { partnerId: first.id, task: secondTask, target: meeting.second });
+    reservedMeetingTargets.push(meeting.first, meeting.second);
     reserved.add(first.id); reserved.add(second.id);
     return true;
   };
@@ -227,29 +238,48 @@ function moveCreature(creature: CreatureState, buildings: BuildingState[], nearb
   updateNavigation(creature, buildings);
   const waypoint = creature.navigationPath[0] ?? creature.target;
   const distance = Math.hypot(waypoint.x - creature.x, waypoint.y - creature.y);
-  if (distance <= 4) return { moved: 0, remaining: Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y) };
   const taskSpeed = creature.task === 'work' ? 46 + creature.personality.diligence * 12 : SOCIAL_TASKS.has(creature.task) ? 42 + creature.personality.sociability * 8 : 35 + creature.personality.curiosity * 8;
-  const movement = Math.min(distance, taskSpeed * seconds);
-  let nextX = creature.x + (waypoint.x - creature.x) / distance * movement;
-  let nextY = creature.y + (waypoint.y - creature.y) / distance * movement;
+  const movement = distance > 4 ? Math.min(distance, taskSpeed * seconds) : 0;
+  const baseX = movement > 0 ? creature.x + (waypoint.x - creature.x) / distance * movement : creature.x;
+  const baseY = movement > 0 ? creature.y + (waypoint.y - creature.y) / distance * movement : creature.y;
+  let nextX = baseX;
+  let nextY = baseY;
 
   let separateX = 0; let separateY = 0;
   for (const other of nearby) {
     if (other.id === creature.id || !other.alive) continue;
     const dx = creature.x - other.x; const dy = creature.y - other.y;
     const gap = Math.hypot(dx, dy);
-    if (gap > 0 && gap < 34) { const force = (34 - gap) / 34; separateX += dx / gap * force; separateY += dy / gap * force; }
+    if (gap >= PERSONAL_SPACE) continue;
+    const force = (PERSONAL_SPACE - gap) / PERSONAL_SPACE;
+    if (gap > 0.001) {
+      separateX += dx / gap * force;
+      separateY += dy / gap * force;
+    } else {
+      const firstId = creature.id < other.id ? creature.id : other.id;
+      const secondId = creature.id < other.id ? other.id : creature.id;
+      let hash = 2166136261;
+      for (const character of `${firstId}:${secondId}`) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+      const angle = (hash >>> 0) / 0xffffffff * Math.PI * 2;
+      const direction = creature.id === firstId ? 1 : -1;
+      separateX += Math.cos(angle) * direction * force;
+      separateY += Math.sin(angle) * direction * force;
+    }
   }
   const separationLength = Math.hypot(separateX, separateY);
   if (separationLength > 0) {
-    nextX += separateX / separationLength * Math.min(12 * seconds, 34 - Math.min(34, separationLength));
-    nextY += separateY / separationLength * Math.min(12 * seconds, 34 - Math.min(34, separationLength));
+    const separationMovement = Math.min(22 * seconds, 4 + separationLength * 5);
+    nextX += separateX / separationLength * separationMovement;
+    nextY += separateY / separationLength * separationMovement;
   }
-  const candidate = { x: nextX, y: nextY };
+  let candidate = { x: nextX, y: nextY };
+  if (isNavigationBlocked(candidate, buildings, creature.destinationBuildingId) && !isNavigationBlocked({ x: baseX, y: baseY }, buildings, creature.destinationBuildingId)) {
+    candidate = { x: baseX, y: baseY };
+  }
   let moved = 0;
   if (!isNavigationBlocked(candidate, buildings, creature.destinationBuildingId)) {
-    moved = Math.hypot(nextX - creature.x, nextY - creature.y);
-    creature.x = nextX; creature.y = nextY;
+    moved = Math.hypot(candidate.x - creature.x, candidate.y - creature.y);
+    creature.x = candidate.x; creature.y = candidate.y;
   }
   else { creature.navigationPath = []; creature.navigationTarget = undefined; }
   return { moved, remaining: Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y) };
@@ -477,10 +507,13 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
     else if (movement.moved >= 0.35 || movement.remaining <= 14) creature.stuckTimer = 0;
     if (socialPlan && creature.socialTimer <= 0) creature.socialPursuitTimer += seconds;
     if (creature.stuckTimer >= STUCK_REPATH_SECONDS) {
-      creature.navigationPath = []; creature.navigationTarget = undefined; creature.stuckTimer = 0;
+      const occupied = next.creatures.filter((other) => other.alive && other.id !== creature.id).map((other) => ({ x: other.x, y: other.y }));
+      const serial = Number(creature.id.replace(/\D/g, '')) || 1;
+      creature.navigationPath = buildRecoveryPath(creature, creature.target, next.buildings, occupied, next.seed + serial * 37, creature.destinationBuildingId);
+      creature.navigationTarget = { ...creature.target };
+      creature.stuckTimer = 0;
       next.livingWorld.telemetry.pathRecoveries++;
       if (socialPlan) creature.socialPursuitTimer += 2.5;
-      else if (task === 'wander') creature.target = { x: creature.x, y: creature.y };
     }
     const destinationDistance = Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y);
     if (creature.directOrder?.kind === 'move' && destinationDistance < 14) {
