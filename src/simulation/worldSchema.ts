@@ -60,8 +60,26 @@ const livingWorld = z.object({
   })).max(20).optional(),
   day: z.number().int().min(1), dayTime: finite.min(0).max(1), season: z.enum(['bloom', 'suncrest', 'amberfall', 'frostquiet']), weather: z.enum(['clear', 'mist', 'rain', 'wind', 'storm']),
   weatherTimer: finite, lastDailyEventDay: z.number().int().min(0),
-  alerts: z.array(z.object({ id: z.string().max(100), severity: z.enum(['info', 'warning', 'critical']), title: z.string().max(100), detail: z.string().max(240), at: finite, dismissed: z.boolean() })).max(20),
+  alerts: z.array(z.object({
+    id: z.string().max(100), severity: z.enum(['info', 'warning', 'critical']), title: z.string().max(100), detail: z.string().max(240), at: finite, dismissed: z.boolean(),
+    creatureId: z.string().max(40).optional(), buildingId: z.string().max(40).optional(), actionLabel: z.string().max(30).optional()
+  })).max(20),
   journal: z.array(z.object({ id: z.string().max(120), at: finite, category: z.enum(['discovery', 'event', 'weather', 'relationship', 'birth', 'loss', 'milestone']), title: z.string().max(160), detail: z.string().max(300) })).max(120),
+  personalRequests: z.array(z.object({
+    id: z.string().max(100), creatureId: z.string().max(40), targetCreatureId: z.string().max(40).optional(),
+    kind: z.enum(['companionship', 'favorite-place', 'purpose']), title: z.string().max(120), detail: z.string().max(300),
+    createdAt: finite.nonnegative(), expiresAt: finite.nonnegative(), status: z.enum(['active', 'resolved', 'expired']), choice: z.enum(['help', 'encourage', 'decline']).optional()
+  })).max(30).optional(),
+  storyEvents: z.array(z.object({
+    id: z.string().max(100), kind: z.enum(['lost-song', 'shared-home', 'reconciliation']), title: z.string().max(140), description: z.string().max(500),
+    creatureIds: z.array(z.string().max(40)).min(1).max(4), stage: z.union([z.literal(1), z.literal(2)]), status: z.enum(['decision', 'resolved']),
+    createdAt: finite.nonnegative(), choices: z.array(z.enum(['gentle', 'bold'])).length(2)
+  })).max(20).optional(),
+  groupActivity: z.object({
+    id: z.string().max(100), kind: z.enum(['meal', 'game', 'celebration']), creatureIds: z.array(z.string().max(40)).min(2).max(8),
+    startedAt: finite.nonnegative(), endsAt: finite.nonnegative(), center: vec2
+  }).optional(),
+  lastRequestDay: z.number().int().min(0).optional(), lastStoryDay: z.number().int().min(0).optional(), lastGroupActivityAt: finite.nonnegative().optional(),
   challenges: z.array(z.object({ id: z.string().max(100), title: z.string().max(100), description: z.string().max(240), progress: finite.nonnegative(), target: finite.positive(), complete: z.boolean() })).max(20),
   settings, telemetry: z.object({ averageTickMs: finite.nonnegative(), peakTickMs: finite.nonnegative(), fps: finite.nonnegative(), creatures: z.number().int().nonnegative(), visibleCreatures: z.number().int().nonnegative(), pathRecoveries: z.number().int().nonnegative() }), saveVersion: z.number().int().min(2)
 });

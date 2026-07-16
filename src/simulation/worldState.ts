@@ -99,9 +99,25 @@ export interface Personality {
   honesty: number;
 }
 export interface GameEvent { type: string; at: number; payload: Record<string, unknown> }
-export interface AlertState { id: string; severity: 'info' | 'warning' | 'critical'; title: string; detail: string; at: number; dismissed: boolean }
+export interface AlertState {
+  id: string; severity: 'info' | 'warning' | 'critical'; title: string; detail: string; at: number; dismissed: boolean;
+  creatureId?: string; buildingId?: string; actionLabel?: string;
+}
 export interface JournalEntry { id: string; at: number; category: 'discovery' | 'event' | 'weather' | 'relationship' | 'birth' | 'loss' | 'milestone'; title: string; detail: string }
 export interface ChallengeState { id: string; title: string; description: string; progress: number; target: number; complete: boolean }
+export type PersonalRequestChoice = 'help' | 'encourage' | 'decline';
+export interface PersonalRequestState {
+  id: string; creatureId: string; targetCreatureId?: string; kind: 'companionship' | 'favorite-place' | 'purpose';
+  title: string; detail: string; createdAt: number; expiresAt: number; status: 'active' | 'resolved' | 'expired'; choice?: PersonalRequestChoice;
+}
+export type StoryChoice = 'gentle' | 'bold';
+export interface StoryEventState {
+  id: string; kind: 'lost-song' | 'shared-home' | 'reconciliation'; title: string; description: string; creatureIds: string[];
+  stage: 1 | 2; status: 'decision' | 'resolved'; createdAt: number; choices: StoryChoice[];
+}
+export interface GroupActivityState {
+  id: string; kind: 'meal' | 'game' | 'celebration'; creatureIds: string[]; startedAt: number; endsAt: number; center: Vec2;
+}
 export interface ExpeditionState {
   id: string;
   regionId: RegionId;
@@ -125,6 +141,8 @@ export interface LivingWorldState {
   reputation: number; level: number; title: string; researchPoints: number; research: Record<ResearchBranch, number>;
   unlockedRegions: RegionId[]; rareResources: { memoryCrystal: number; wildSeed: number }; expeditions: ExpeditionState[]; day: number; dayTime: number;
   season: SeasonKind; weather: WeatherKind; weatherTimer: number; lastDailyEventDay: number; alerts: AlertState[]; journal: JournalEntry[];
+  personalRequests: PersonalRequestState[]; storyEvents: StoryEventState[]; groupActivity?: GroupActivityState;
+  lastRequestDay: number; lastStoryDay: number; lastGroupActivityAt: number;
   challenges: ChallengeState[]; settings: GameSettings; telemetry: { averageTickMs: number; peakTickMs: number; fps: number; creatures: number; visibleCreatures: number; pathRecoveries: number }; saveVersion: number;
 }
 export interface WorldState {
@@ -235,9 +253,10 @@ export function createInitialWorld(seed = Date.now()): WorldState {
       research: { care: 0, nature: 0, technology: 0, society: 0, exploration: 0 }, unlockedRegions: ['lumen-field'],
       rareResources: { memoryCrystal: 0, wildSeed: 0 }, expeditions: [], day: 1, dayTime: 0.28, season: 'bloom', weather: 'clear', weatherTimer: 80, lastDailyEventDay: 0,
       alerts: [], journal: [{ id: 'awakening', at: 0, category: 'discovery', title: 'Habitat 483 awakens', detail: 'Pip-01 answered the first signal.' }],
+      personalRequests: [], storyEvents: [], lastRequestDay: 0, lastStoryDay: 0, lastGroupActivityAt: 0,
       challenges: [],
       settings: { muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, textScale: 1.1, highContrast: false, colorBlind: false, reducedMotion: false, screenShake: true, lowPower: false, quality: 'high', offlineLimitMinutes: 15, simulationSpeed: 1, paused: false, subtitles: true, tutorial: true, alertLevel: 'all' },
-      telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 }, saveVersion: 3
+      telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 }, saveVersion: 4
     }
   };
 }

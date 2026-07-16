@@ -3,14 +3,15 @@ import { RESEARCH_BRANCHES, relationshipStage } from '../simulation/livingWorld'
 import { OBJECTIVES } from '../simulation/progression';
 import { ROLE_LABELS, SKILL_KEYS, SKILL_LABELS, skillLevel } from '../simulation/colonyLife';
 import { expeditionResearchCost, REGIONS } from '../simulation/expeditions';
-import type { CreatureRole, GameSettings, RegionId, ResearchBranch } from '../simulation/worldState';
+import { explainCreatureAction, relationshipTone } from '../simulation/colonyStories';
+import type { AlertState, CreatureRole, GameSettings, JournalEntry, RegionId, ResearchBranch } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
 import { saveService } from '../services/saveService';
 import { button, panel } from '../ui/hud';
 import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
 
-type Page = 'OVERVIEW' | 'EXPLORE' | 'RESEARCH' | 'LUMA' | 'JOURNAL' | 'SETTINGS' | 'SAVES' | 'CHANGELOG';
-const PAGES: Page[] = ['OVERVIEW', 'EXPLORE', 'RESEARCH', 'LUMA', 'JOURNAL', 'SETTINGS', 'SAVES', 'CHANGELOG'];
+type Page = 'OVERVIEW' | 'SOCIAL' | 'EXPLORE' | 'RESEARCH' | 'LUMA' | 'HISTORY' | 'SETTINGS' | 'SAVES' | 'CHANGELOG';
+const PAGES: Page[] = ['OVERVIEW', 'SOCIAL', 'EXPLORE', 'RESEARCH', 'LUMA', 'HISTORY', 'SETTINGS', 'SAVES', 'CHANGELOG'];
 const ROLES: Array<CreatureRole | 'auto'> = ['auto', 'forager', 'caretaker', 'healer', 'builder', 'researcher', 'explorer'];
 
 export class ColonyScene extends Phaser.Scene {
@@ -22,6 +23,7 @@ export class ColonyScene extends Phaser.Scene {
   private header?: Phaser.GameObjects.Text;
   private tabs: Phaser.GameObjects.Container[] = [];
   private teamCursor = 0;
+  private historyFilter: 'all' | 'relationship' | 'story' | 'life' = 'all';
 
   constructor() { super('ColonyScene'); }
 
@@ -52,8 +54,10 @@ export class ColonyScene extends Phaser.Scene {
       const control = button(this, left + 24 + tabWidth / 2 + column * (tabWidth + gap), top + 66 + row * 36, tabWidth, 32, compactTabs ? page.slice(0, 4) : page, page === this.page ? 0xf7bd62 : 0x7af6bd);
       control.setScale(width < 480 ? 0.98 : 1); control.on('pointerup', () => { this.page = page; this.rebuild(); }); this.tabs.push(control);
     });
-    this.content = this.add.container(left + 24, top + (compactTabs ? 134 : 98));
-    this.content.setData({ width: usable, height: cardHeight - (compactTabs ? 152 : 116) });
+    const tabRows = Math.ceil(PAGES.length / columns);
+    const contentTop = top + (compactTabs ? 62 + tabRows * 36 : 98);
+    this.content = this.add.container(left + 24, contentTop);
+    this.content.setData({ width: usable, height: top + cardHeight - 18 - contentTop });
     this.renderPage();
   };
 
@@ -62,10 +66,11 @@ export class ColonyScene extends Phaser.Scene {
     this.content.removeAll(true);
     this.header.setText(`COLONY COMMAND  /  ${this.page}`);
     if (this.page === 'OVERVIEW') this.renderOverview();
+    if (this.page === 'SOCIAL') this.renderSocial();
     if (this.page === 'EXPLORE') this.renderExplore();
     if (this.page === 'RESEARCH') this.renderResearch();
     if (this.page === 'LUMA') this.renderLuma();
-    if (this.page === 'JOURNAL') this.renderJournal();
+    if (this.page === 'HISTORY') this.renderHistory();
     if (this.page === 'SETTINGS') this.renderSettings();
     if (this.page === 'SAVES') this.renderSaves();
     if (this.page === 'CHANGELOG') this.renderChangelog();
@@ -99,11 +104,96 @@ export class ColonyScene extends Phaser.Scene {
     if (!activeAlerts.length) this.addText(0, 148, 'No urgent colony alerts. The habitat is stable.', 12, '#90c9b0');
     activeAlerts.slice(0, 4).forEach((alert, index) => {
       const y = 152 + index * 54; this.addText(0, y, `${alert.severity === 'critical' ? '!!' : '!'}  ${alert.title.toUpperCase()}\n${alert.detail}`, 11, alert.severity === 'critical' ? '#ff9b89' : '#ffe1a0', width - 126);
-      this.addButton(width - 55, y + 14, 104, 'DISMISS', 0x65c7ff, () => gameStore.dismissAlert(alert.id));
+      this.addButton(width - 55, y + 14, 104, alert.actionLabel ?? 'DISMISS', alert.actionLabel ? 0x7af6bd : 0x65c7ff, () => this.handleAlert(alert));
     });
     const challengeY = 188 + Math.max(1, activeAlerts.slice(0, 4).length) * 54;
     this.addHeading(0, challengeY, 'OPTIONAL CHALLENGES');
     world.challenges.forEach((challenge, index) => this.addText(0, challengeY + 27 + index * 42, `${challenge.complete ? '✓' : '◇'} ${challenge.title.toUpperCase()}  ${Math.floor(challenge.progress)}/${challenge.target}\n${challenge.description}`, 11, challenge.complete ? '#7af6bd' : '#dff5ea', width));
+  }
+
+  private handleAlert(alert: AlertState) {
+    if (alert.actionLabel === 'OPEN SOCIAL') { this.page = 'SOCIAL'; this.rebuild(); return; }
+    if (alert.creatureId) {
+      const creature = this.state.creatures.find((candidate) => candidate.id === alert.creatureId);
+      if (creature) { this.game.events.emit('creature-selected', creature); this.game.events.emit('focus-creature', creature.id); this.scene.stop(); }
+      return;
+    }
+    if (alert.buildingId) {
+      const building = this.state.buildings.find((candidate) => candidate.id === alert.buildingId);
+      if (building) { this.game.events.emit('building-selected', building); this.scene.stop(); }
+      return;
+    }
+    gameStore.dismissAlert(alert.id);
+  }
+
+  private renderSocial() {
+    const { width } = this.dimensions(); const compact = width < 600; const world = this.state.livingWorld;
+    const living = this.state.creatures.filter((creature) => creature.alive);
+    const request = world.personalRequests.find((item) => item.status === 'active');
+    const story = world.storyEvents.find((item) => item.status === 'decision');
+    const activity = world.groupActivity;
+    this.addHeading(0, 0, 'COLONY MOMENT');
+    this.addText(0, 27, activity
+      ? `${activity.kind.toUpperCase()} IN PROGRESS · ${activity.creatureIds.map((id) => this.state.creatures.find((creature) => creature.id === id)?.name).filter(Boolean).join(' · ')}`
+      : 'No group activity is active. Healthy colonies naturally gather for meals, games, and celebrations.', compact ? 9 : 11, activity ? '#f7bd62' : '#90c9b0', width);
+
+    const requestY = 68;
+    this.addHeading(0, requestY, 'PERSONAL REQUEST', request ? '#ff8fcf' : '#758b80');
+    if (!request) this.addText(0, requestY + 27, 'No Luma is waiting for an answer. New named requests emerge as colony days pass.', compact ? 9 : 11, '#90c9b0', width);
+    else {
+      this.addText(0, requestY + 27, `${request.title.toUpperCase()}\n${request.detail}`, compact ? 9 : 11, '#e4f7ed', width);
+      const y = requestY + (compact ? 91 : 84); const buttonWidth = compact ? Math.floor((width - 12) / 3) : 150;
+      this.addButton(buttonWidth / 2, y, buttonWidth, 'HELP · 8G', 0x7af6bd, () => { if (!gameStore.answerPersonalRequest(request.id, 'help')) this.toast('Helping this request needs 8 GLOW'); });
+      this.addButton(buttonWidth * 1.5 + 6, y, buttonWidth, 'ENCOURAGE', 0x65c7ff, () => gameStore.answerPersonalRequest(request.id, 'encourage'));
+      this.addButton(buttonWidth * 2.5 + 12, y, buttonWidth, 'DECLINE', 0xff735f, () => gameStore.answerPersonalRequest(request.id, 'decline'));
+    }
+
+    const storyY = request ? 205 : 145;
+    this.addHeading(0, storyY, 'COLONY STORY', story ? '#bf78ff' : '#758b80');
+    if (!story) this.addText(0, storyY + 27, 'No story decision is waiting. Colony history, conflicts, and relationships shape what appears next.', compact ? 9 : 11, '#90c9b0', width);
+    else {
+      const names = story.creatureIds.map((id) => this.state.creatures.find((creature) => creature.id === id)?.name).filter(Boolean).join(' · ');
+      this.addText(0, storyY + 27, `STAGE ${story.stage}/2 · ${story.title.toUpperCase()} · ${names}\n${story.description}`, compact ? 9 : 11, '#e4f7ed', width);
+      const y = storyY + (compact ? 104 : 88);
+      this.addButton(width * 0.25, y, Math.min(220, width * 0.45), story.stage === 1 ? 'GIVE THEM TIME' : 'KEEP IT PERSONAL', 0x7af6bd, () => gameStore.answerStory(story.id, 'gentle'));
+      this.addButton(width * 0.75, y, Math.min(220, width * 0.45), story.stage === 1 ? 'ASK FOR CLARITY' : 'SHARE THE MOMENT', 0xf7bd62, () => gameStore.answerStory(story.id, 'bold'));
+    }
+
+    const relationshipY = storyY + (story ? (compact ? 155 : 140) : 75);
+    this.addHeading(0, relationshipY, 'RELATIONSHIP NETWORK');
+    const pairs = living.flatMap((first) => Object.entries(first.bonds).map(([id, strength]) => {
+      const second = living.find((candidate) => candidate.id === id);
+      return second && first.id < second.id ? { first, second, strength } : undefined;
+    })).filter((pair): pair is { first: typeof living[number]; second: typeof living[number]; strength: number } => Boolean(pair))
+      .sort((a, b) => b.strength - a.strength);
+    const socialGroups: string[][] = [];
+    const grouped = new Set<string>();
+    living.forEach((creature) => {
+      if (grouped.has(creature.id)) return;
+      const queue = [creature]; const group: string[] = []; grouped.add(creature.id);
+      while (queue.length) {
+        const member = queue.shift(); if (!member) continue; group.push(member.name);
+        Object.entries(member.bonds).filter(([, strength]) => strength >= 35).forEach(([id]) => {
+          const next = living.find((candidate) => candidate.id === id);
+          if (next && !grouped.has(next.id)) { grouped.add(next.id); queue.push(next); }
+        });
+      }
+      if (group.length > 1) socialGroups.push(group);
+    });
+    if (socialGroups.length && !compact) this.addText(width * 0.52, relationshipY, `${socialGroups.length} SOCIAL GROUP${socialGroups.length === 1 ? '' : 'S'}  ·  LARGEST ${Math.max(...socialGroups.map((group) => group.length))}`, 10, '#90c9b0', width * 0.48);
+    if (!pairs.length) this.addText(0, relationshipY + 28, 'The colony has no established bonds yet. Shared activities and social time will create them.', compact ? 9 : 11, '#90c9b0', width);
+    pairs.slice(0, compact ? 2 : 6).forEach((pair, index) => {
+      const y = relationshipY + 29 + index * (compact ? 34 : 30);
+      this.addText(0, y, `${relationshipTone(this.state, pair.first, pair.second)}  ·  ${pair.first.name} ↔ ${pair.second.name}  ·  ${Math.round(pair.strength)}%`, compact ? 9 : 10, pair.strength >= 60 ? '#7af6bd' : '#dff5ea', width);
+    });
+    const familyY = relationshipY + 48 + Math.min(compact ? 2 : 6, Math.max(1, pairs.length)) * (compact ? 34 : 30);
+    this.addHeading(0, familyY, 'FAMILY & MENTOR LINES');
+    const lines = living.filter((creature) => creature.parentId || creature.mentorId).slice(0, compact ? 2 : 5).map((creature) => {
+      const parent = this.state.creatures.find((candidate) => candidate.id === creature.parentId)?.name;
+      const mentor = this.state.creatures.find((candidate) => candidate.id === creature.mentorId)?.name;
+      return `GEN ${creature.generation}  ${creature.name}  ←  ${parent ? `PARENT ${parent}` : ''}${parent && mentor ? ' · ' : ''}${mentor ? `MENTOR ${mentor}` : ''}`;
+    });
+    this.addText(0, familyY + 27, lines.length ? lines.join('\n') : 'The first generation is still forming family and mentorship lines.', compact ? 9 : 10, '#d8c69a', width);
   }
 
   private renderResearch() {
@@ -177,7 +267,7 @@ export class ColonyScene extends Phaser.Scene {
     const partner = strongest ? this.state.creatures.find((candidate) => candidate.id === strongest[0]) : undefined;
     this.addHeading(0, 0, `${creature.name.toUpperCase()}  ·  GEN ${creature.generation}  ·  ${creature.voiceStyle.toUpperCase()} VOICE`);
     const navY = compact ? 43 : 10;
-    this.addText(0, compact ? 70 : 28, `${ROLE_LABELS[creature.assignedRole]}${creature.autoRole ? ' / SELF-DIRECTED' : ' / ASSIGNED'}  ·  AGE ${Math.floor(creature.age)}\nCONCERN  ${creature.currentConcern}\nTRAITS  ${creature.traits.length ? creature.traits.join(' · ').toUpperCase() : 'STILL EMERGING'}\nFAVORITES  ${creature.favoriteFood.toUpperCase()}  ·  ${creature.preferences.favoriteActivity.toUpperCase()}${partner && strongest ? `\nSTRONGEST BOND  ${partner.name} / ${relationshipStage(strongest[1])} ${Math.floor(strongest[1])}%` : ''}`, compact ? 9 : 11, '#dff5ea', compact ? width : width * 0.48);
+    this.addText(0, compact ? 70 : 28, `${ROLE_LABELS[creature.assignedRole]}${creature.autoRole ? ' / SELF-DIRECTED' : ' / ASSIGNED'}  ·  AGE ${Math.floor(creature.age)}\nWHY  ${explainCreatureAction(this.state, creature)}\nTRAITS  ${creature.traits.length ? creature.traits.join(' · ').toUpperCase() : 'STILL EMERGING'}\nFAVORITES  ${creature.favoriteFood.toUpperCase()}  ·  ${creature.preferences.favoriteActivity.toUpperCase()}${partner && strongest ? `\nSTRONGEST BOND  ${partner.name} / ${relationshipStage(strongest[1])} ${Math.floor(strongest[1])}%` : ''}`, compact ? 9 : 11, '#dff5ea', compact ? width : width * 0.48);
     this.addButton(compact ? 36 : width - 282, navY, 64, '◀', 0x65c7ff, () => { this.selectedCreatureId = living[(index - 1 + living.length) % living.length].id; this.renderPage(); });
     this.addButton(compact ? 106 : width - 200, navY, 64, '▶', 0x65c7ff, () => { this.selectedCreatureId = living[(index + 1) % living.length].id; this.renderPage(); });
     this.addButton(compact ? width - 68 : width - 92, navY, compact ? 128 : 126, 'RENAME', 0xff8fcf, () => {
@@ -202,12 +292,25 @@ export class ColonyScene extends Phaser.Scene {
     this.addText(0, historyY + 27, `${family}\n${history || 'Its story is only beginning.'}`, compact ? 9 : 10, '#d8c69a', width);
   }
 
-  private renderJournal() {
-    const { width } = this.dimensions();
-    this.addText(0, 0, 'The journal records births, discoveries, relationships, weather, milestones, and colony events. New history changes what the habitat can become.', 11, '#90c9b0', width);
-    [...this.state.livingWorld.journal].slice(-11).reverse().forEach((entry, index) => {
-      this.addHeading(0, 54 + index * 48, `DAY ${Math.floor(entry.at / 240) + 1}  /  ${entry.category.toUpperCase()}  /  ${entry.title}`);
-      this.addText(0, 75 + index * 48, entry.detail, 10, '#dff5ea', width);
+  private renderHistory() {
+    const { width } = this.dimensions(); const compact = width < 600;
+    this.addText(0, 0, 'A filterable colony timeline of discoveries, choices, births, friendships, conflicts, losses, and milestones.', compact ? 9 : 11, '#90c9b0', width);
+    const filters: Array<typeof this.historyFilter> = ['all', 'relationship', 'story', 'life'];
+    const buttonWidth = (width - 15) / 4;
+    filters.forEach((filter, index) => this.addButton(buttonWidth / 2 + index * (buttonWidth + 5), 55, buttonWidth, filter.toUpperCase(), this.historyFilter === filter ? 0xf7bd62 : 0x65c7ff, () => {
+      this.historyFilter = filter; this.renderPage();
+    }));
+    const filtered = [...this.state.livingWorld.journal].filter((entry) => {
+      if (this.historyFilter === 'all') return true;
+      if (this.historyFilter === 'relationship') return entry.category === 'relationship';
+      if (this.historyFilter === 'story') return entry.category === 'event' || entry.id.startsWith('story-');
+      return ['birth', 'loss', 'milestone'].includes(entry.category);
+    }).slice(-(compact ? 6 : 9)).reverse();
+    if (!filtered.length) this.addText(0, 92, 'No entries match this timeline filter yet.', 11, '#90c9b0');
+    filtered.forEach((entry: JournalEntry, index) => {
+      const y = 94 + index * (compact ? 62 : 52);
+      this.addHeading(0, y, `DAY ${Math.floor(entry.at / 240) + 1}  /  ${entry.category.toUpperCase()}  /  ${entry.title}`);
+      this.addText(0, y + 22, entry.detail, compact ? 9 : 10, '#dff5ea', width);
     });
   }
 
@@ -273,8 +376,8 @@ export class ColonyScene extends Phaser.Scene {
 
   private renderChangelog() {
     const { width } = this.dimensions();
-    this.addHeading(0, 0, 'MIDGAME EXPLORATION & CLARITY UPDATE  /  2026.07');
-    this.addText(0, 30, 'EXPEDITIONS\nFour regional permits now open through habitat reputation. Build teams of 2–3 Luma, pay visible supply costs, follow timed journeys, and receive safe but skill-sensitive named outcomes. Every return asks whether to preserve a discovery or salvage its relic.\n\nADVANCED PROGRESSION\nExpeditions produce Wild Seed and Memory Crystal. Research tiers 3–5 consume rare matter, and every level-2 facility can now evolve into a visible level-3 Ascendant form with more output and capacity. Five new guided steps teach the complete loop.\n\nREADABILITY\nAll game text now uses anti-aliased, high-resolution rendering, subpixel placement, stronger system fonts, clearer weights and contrast, larger creature-card labels, a 110% default text scale, and a two-row mobile command layout.\n\nRECOVERY & LIVING WORLD\nRecovery signals, offline reports, original positional voices, roles, six skills, preferences, relationships, queues, reputation, events, weather, save slots, accessibility controls, telemetry, and production smoke tests remain fully integrated.', 12, '#e4f7ed', width);
+    this.addHeading(0, 0, 'COLONY STORIES & RELATIONSHIPS UPDATE  /  2026.07');
+    this.addText(0, 30, 'LIVING SOCIETY\nHealthy Luma now gather for group meals, games, and celebrations. Social behavior includes friendship, comfort, arguments, automatic reconciliation, mentorship, admiration, rivalry, family, and Lifebonds—with stronger visual reactions in the habitat.\n\nPERSONAL REQUESTS\nNamed Luma ask for companionship, favorite places, or purpose. HELP, ENCOURAGE, and DECLINE have explicit costs and lasting effects on happiness, stress, bonds, personality, and personal history.\n\nCOLONY STORIES\nMulti-stage events reference real creatures and colony history. Give them time or demand clarity, then decide whether the result remains personal or becomes a shared tradition. Consequences persist in bonds, research, reputation, memories, and the timeline.\n\nSOCIAL COMMAND & HISTORY\nA dedicated SOCIAL overview maps relationship types and family lines. HISTORY replaces the flat journal with filters for relationships, stories, and life milestones. Actionable alerts now name the affected Luma or building, explain why, and navigate directly to the problem.', 12, '#e4f7ed', width);
   }
 
   private shutdown() { this.unsubscribe?.(); this.unsubscribe = undefined; this.scale.off('resize', this.rebuild, this); this.input.keyboard?.removeAllListeners(); }

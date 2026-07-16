@@ -1,8 +1,9 @@
 import { advancedUpgradeCost, BUILDINGS, canAfford, canAffordAdvancedUpgrade, canAffordUpgrade, createBuilding, upgradeCost, validateBuildingPlacement } from '../simulation/building';
 import { expeditionResearchCost, launchExpedition, resolveExpeditionDecision } from '../simulation/expeditions';
+import { resolvePersonalRequest, resolveStoryChoice } from '../simulation/colonyStories';
 import { addJournal, RESEARCH_BRANCHES } from '../simulation/livingWorld';
 import { recoverSilentColony } from '../simulation/recovery';
-import type { BuildingKind, CreatureRole, CreatureState, ExpeditionChoice, GameSettings, NeedKey, RegionId, ResearchBranch, WorldState } from '../simulation/worldState';
+import type { BuildingKind, CreatureRole, CreatureState, ExpeditionChoice, GameSettings, NeedKey, PersonalRequestChoice, RegionId, ResearchBranch, StoryChoice, WorldState } from '../simulation/worldState';
 import { appendWorldEvent, createInitialWorld } from '../simulation/worldState';
 
 type Listener = (state: WorldState) => void;
@@ -115,6 +116,16 @@ class GameStateStore {
   resolveExpedition(id: string, choice: ExpeditionChoice) {
     const next = structuredClone(this.state);
     if (!resolveExpeditionDecision(next, id, choice)) return false;
+    this.set(next); return true;
+  }
+  answerPersonalRequest(id: string, choice: PersonalRequestChoice) {
+    const next = structuredClone(this.state);
+    if (!resolvePersonalRequest(next, id, choice)) return false;
+    this.set(next); return true;
+  }
+  answerStory(id: string, choice: StoryChoice) {
+    const next = structuredClone(this.state);
+    if (!resolveStoryChoice(next, id, choice)) return false;
     this.set(next); return true;
   }
   updateSetting<K extends keyof GameSettings>(key: K, value: GameSettings[K]) {
