@@ -20,6 +20,7 @@ import { parseWorldState } from '../src/simulation/worldSchema';
 import { relationshipTone, resolvePersonalRequest, resolveStoryChoice, updateColonyStories } from '../src/simulation/colonyStories';
 import { creaturePose, presentationBudget, soundscapeMood, soundscapeNotes } from '../src/rendering/presentation';
 import { applyManagementPreset, canSpendReserve, colonyForecast, colonyJobQueue, directOrderTask, managedTask, schedulePhase } from '../src/simulation/colonyManagement';
+import { assignOutpostStaff, createSupplyRoute, establishOutpost } from '../src/simulation/regionalWorld';
 
 describe('living world progression', () => {
   it('advances day, season, reputation, research, and regional permits', () => {
@@ -89,6 +90,37 @@ describe('living world progression', () => {
     expect(world.livingWorld.rareResources.wildSeed).toBe(2);
   });
 
+  it('turns scouting into persistent staffed outposts and supply deliveries', () => {
+    let world = createInitialWorld(123); world.resources = { glow: 1000, alloy: 500 };
+    world.livingWorld.level = 2; world.livingWorld.unlockedRegions = ['lumen-field', 'whisper-grove'];
+    world.livingWorld.regionProgress['whisper-grove'].scouting = 100;
+    world.livingWorld.regionProgress['whisper-grove'].status = 'scouted';
+    const established = establishOutpost(world, 'whisper-grove');
+    expect(established.ok).toBe(true);
+    const outpost = world.livingWorld.outposts[0];
+    expect(assignOutpostStaff(world, outpost.id, 'c1')).toBe(true);
+    expect(createSupplyRoute(world, outpost.id).ok).toBe(true);
+    const glowBefore = world.resources.glow;
+    world = tickWorld(world, 65);
+    expect(outpost.id).toBe(world.livingWorld.outposts[0].id);
+    expect(world.livingWorld.supplyRoutes[0].delivered.glow).toBeGreaterThan(0);
+    expect(world.resources.glow).toBeGreaterThan(glowBefore);
+    expect(world.creatures[0].expeditionId).toBe(outpost.id);
+    expect(world.creatures[0].skills.exploration).toBeGreaterThan(0);
+  });
+
+  it('includes regional route production in safe offline progress', () => {
+    const world = createInitialWorld(124); world.resources = { glow: 1000, alloy: 500 };
+    world.livingWorld.level = 2; world.livingWorld.unlockedRegions = ['lumen-field', 'whisper-grove'];
+    world.livingWorld.regionProgress['whisper-grove'].scouting = 100;
+    establishOutpost(world, 'whisper-grove'); const outpost = world.livingWorld.outposts[0];
+    assignOutpostStaff(world, outpost.id, 'c1'); createSupplyRoute(world, outpost.id);
+    const result = advanceOfflineWorld(world, 180);
+    expect(result.summary?.activeOutposts).toBe(1);
+    expect(result.summary?.regionalGlow).toBeGreaterThan(0);
+    expect(result.state.creatures[0].alive).toBe(true);
+  });
+
   it('adds a final rare-material facility evolution', () => {
     const building = createBuilding('nutrient-bed', 700, 500, 1); const base = buildingCapacity(building); building.level = 2; building.upgradeBranch = 'quality';
     expect(advancedUpgradeCost(building).wildSeed).toBe(1); building.level = 3;
@@ -152,7 +184,10 @@ describe('living world progression', () => {
     expect(migrated?.livingWorld.personalRequests).toEqual([]);
     expect(migrated?.livingWorld.storyEvents).toEqual([]);
     expect(migrated?.livingWorld.settings.musicVolume).toBeGreaterThan(0);
-    expect(migrated?.livingWorld.saveVersion).toBe(8);
+    expect(migrated?.livingWorld.saveVersion).toBe(9);
+    expect(migrated?.livingWorld.activeRegion).toBe('lumen-field');
+    expect(migrated?.livingWorld.regionProgress['lumen-field'].scouting).toBe(100);
+    expect(migrated?.livingWorld.outposts).toEqual([]);
     expect(migrated?.creatures[0].history.length).toBeGreaterThan(0);
     expect(migrated?.creatures[0].voiceStyle).toBeTruthy();
   });
@@ -173,7 +208,7 @@ describe('living world progression', () => {
     delete legacy.livingWorld.settings.musicVolume; legacy.livingWorld.saveVersion = 5;
     const migrated = parseWorldState(legacy);
     expect(migrated?.livingWorld.settings.musicVolume).toBe(0.3);
-    expect(migrated?.livingWorld.saveVersion).toBe(8);
+    expect(migrated?.livingWorld.saveVersion).toBe(9);
   });
 
   it('migrates colony management, schedules, crews, and staffing preferences', () => {
@@ -190,7 +225,7 @@ describe('living world progression', () => {
     expect(migrated?.creatures[0].schedule).toBe('balanced');
     expect(migrated?.creatures[0].managementGroupId).toBeTruthy();
     expect(migrated?.buildings[0].preferredOperatorIds).toEqual([]);
-    expect(migrated?.livingWorld.saveVersion).toBe(8);
+    expect(migrated?.livingWorld.saveVersion).toBe(9);
     expect(migrated?.creatures[0].customSchedule).toHaveLength(8);
     expect(migrated?.livingWorld.management.metrics).toEqual([]);
   });

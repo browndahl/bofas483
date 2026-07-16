@@ -19,6 +19,8 @@ export type VoiceStyle = 'chirpy' | 'round' | 'whispery' | 'raspy' | 'musical';
 export type RegionId = 'lumen-field' | 'whisper-grove' | 'mirror-marsh' | 'old-signal-ridge' | 'aurora-basin';
 export type ExpeditionStatus = 'active' | 'decision' | 'complete';
 export type ExpeditionChoice = 'preserve' | 'salvage';
+export type RegionHazard = 'none' | 'thorns' | 'flood' | 'storm' | 'radiance';
+export type RegionDiscoveryKind = 'seed-vault' | 'memory-ruin' | 'signal-array' | 'living-archive';
 export type ManagementPriorityKey = 'medical' | 'food' | 'cleanliness' | 'rest' | 'morale' | 'maintenance' | 'construction' | 'industry';
 export type ColonyPolicyKey = 'emergencyFirst' | 'repairBeforeConstruction' | 'protectReserves' | 'autoStaff';
 export type CreatureSchedule = 'balanced' | 'early' | 'late' | 'flexible' | 'custom';
@@ -173,6 +175,24 @@ export interface ExpeditionState {
   glowReward?: number;
   alloyReward?: number;
   choice?: ExpeditionChoice;
+  progress?: number;
+  scoutingReward?: number;
+}
+export interface RegionProgressState {
+  regionId: RegionId; scouting: number; status: 'locked' | 'permitted' | 'scouted' | 'settled';
+  hazard: RegionHazard; discovered: RegionDiscoveryKind[]; preserved: boolean; visits: number;
+}
+export interface OutpostState {
+  id: string; regionId: Exclude<RegionId, 'lumen-field'>; name: string; level: number; condition: number;
+  staffIds: string[]; storage: Resources; storageCapacity: number; supplies: Resources; lastTickAt: number;
+}
+export interface SupplyRouteState {
+  id: string; regionId: Exclude<RegionId, 'lumen-field'>; active: boolean; throughput: number; risk: number;
+  nextDeliveryAt: number; delivered: Resources;
+}
+export interface RegionalVisitorState {
+  id: string; regionId: Exclude<RegionId, 'lumen-field'>; name: string; voiceStyle: VoiceStyle; trait: string;
+  arrivedAt: number; expiresAt: number; status: 'waiting' | 'joined' | 'departed';
 }
 export interface GameSettings {
   muted: boolean; voiceVolume: number; ambienceVolume: number; musicVolume: number; textScale: number; highContrast: boolean; colorBlind: boolean;
@@ -187,6 +207,11 @@ export interface LivingWorldState {
   lastRequestDay: number; lastStoryDay: number; lastGroupActivityAt: number;
   challenges: ChallengeState[]; settings: GameSettings; telemetry: { averageTickMs: number; peakTickMs: number; fps: number; creatures: number; visibleCreatures: number; pathRecoveries: number }; saveVersion: number;
   management: ColonyManagementState;
+  activeRegion: RegionId;
+  regionProgress: Record<RegionId, RegionProgressState>;
+  outposts: OutpostState[];
+  supplyRoutes: SupplyRouteState[];
+  regionalVisitors: RegionalVisitorState[];
 }
 export interface WorldState {
   version: 1;
@@ -325,7 +350,18 @@ export function createInitialWorld(seed = Date.now()): WorldState {
         tutorialStep: 0,
         metrics: []
       },
-      saveVersion: 8
+      activeRegion: 'lumen-field',
+      regionProgress: {
+        'lumen-field': { regionId: 'lumen-field', scouting: 100, status: 'settled', hazard: 'none', discovered: [], preserved: true, visits: 1 },
+        'whisper-grove': { regionId: 'whisper-grove', scouting: 0, status: 'locked', hazard: 'thorns', discovered: [], preserved: false, visits: 0 },
+        'mirror-marsh': { regionId: 'mirror-marsh', scouting: 0, status: 'locked', hazard: 'flood', discovered: [], preserved: false, visits: 0 },
+        'old-signal-ridge': { regionId: 'old-signal-ridge', scouting: 0, status: 'locked', hazard: 'storm', discovered: [], preserved: false, visits: 0 },
+        'aurora-basin': { regionId: 'aurora-basin', scouting: 0, status: 'locked', hazard: 'radiance', discovered: [], preserved: false, visits: 0 }
+      },
+      outposts: [],
+      supplyRoutes: [],
+      regionalVisitors: [],
+      saveVersion: 9
     }
   };
 }

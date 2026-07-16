@@ -3,6 +3,7 @@ import { appendWorldEvent } from './worldState';
 import { updateExpeditions } from './expeditions';
 import { updateColonyStories } from './colonyStories';
 import { colonyForecast, createColonyManagement, ensureColonyManagement } from './colonyManagement';
+import { createRegionProgress, ensureRegionalWorld, updateRegionalWorld } from './regionalWorld';
 
 export const RESEARCH_BRANCHES: Record<ResearchBranch, { name: string; description: string; bonus: string }> = {
   care: { name: 'CARE', description: 'Gentler recovery and stronger offline safety.', bonus: '+5% care efficiency per level' },
@@ -63,7 +64,12 @@ export function createLivingWorld(): LivingWorldState {
     },
     telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 },
     management: createColonyManagement(),
-    saveVersion: 8
+    activeRegion: 'lumen-field',
+    regionProgress: createRegionProgress(),
+    outposts: [],
+    supplyRoutes: [],
+    regionalVisitors: [],
+    saveVersion: 9
   };
 }
 
@@ -92,7 +98,8 @@ export function ensureLivingWorld(world: WorldState) {
     world.livingWorld.settings.textScale = Math.max(1.1, world.livingWorld.settings.textScale);
   }
   ensureColonyManagement(world);
-  world.livingWorld.saveVersion = 8;
+  ensureRegionalWorld(world);
+  world.livingWorld.saveVersion = 9;
 }
 
 export function addJournal(world: WorldState, entry: Omit<JournalEntry, 'id' | 'at'> & { id?: string; at?: number }) {
@@ -259,6 +266,7 @@ export function updateLivingWorld(world: WorldState, seconds: number) {
   });
   dailyEvent(world);
   updateColonyStories(world, seconds);
+  updateRegionalWorld(world, seconds);
   if (Math.floor(world.time) % 5 === 0) { updateAlerts(world); updateChallenges(world); }
 }
 

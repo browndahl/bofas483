@@ -43,12 +43,15 @@ export class AwaySummaryScene extends Phaser.Scene {
       crisp(this.add.text(width / 2 - cardWidth / 2 + 42, y, label, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#dbeee5' })).setOrigin(0, 0.5).setDepth(303);
       crisp(this.add.text(width / 2 + cardWidth / 2 - 42, y, value, { fontFamily: DISPLAY_FONT, fontSize: '15px', color: Phaser.Display.Color.IntegerToColor(color).rgba })).setOrigin(1, 0.5).setDepth(303);
     });
+    const regional = this.summary.activeOutposts > 0
+      ? `${this.summary.activeOutposts} staffed outpost${this.summary.activeOutposts === 1 ? '' : 's'} delivered ${signed(this.summary.regionalGlow)} GLOW / ${signed(this.summary.regionalAlloy)} ALLOY.`
+      : '';
     const safety = this.summary.livingAtStart === 0
       ? 'The habitat was already silent when this interval began.'
       : this.summary.protectedLuma > 0
         ? `${this.summary.protectedLuma} exhausted Luma protected from permanent offline silence.`
         : `All ${this.summary.livingAtEnd} living Luma remained stable during offline simulation.`;
-    crisp(this.add.text(width / 2, height / 2 + cardHeight / 2 - 86, safety, { fontFamily: UI_FONT, fontSize: '10px', color: '#8eb4a2', align: 'center', wordWrap: { width: cardWidth - 52 } })).setOrigin(0.5).setDepth(303);
+    crisp(this.add.text(width / 2, height / 2 + cardHeight / 2 - 86, `${regional}${regional ? '\n' : ''}${safety}`, { fontFamily: UI_FONT, fontSize: '10px', color: '#8eb4a2', align: 'center', wordWrap: { width: cardWidth - 52 } })).setOrigin(0.5).setDepth(303);
     if (this.summary.importantEvents.length) crisp(this.add.text(width / 2, height / 2 + cardHeight / 2 - 112, this.summary.importantEvents.join('  ·  '), { fontFamily: UI_FONT, fontSize: '9px', color: '#f7bd62', align: 'center', wordWrap: { width: cardWidth - 54 } })).setOrigin(0.5).setDepth(303);
     const needsRecovery = this.summary.livingAtEnd === 0;
     const resume = button(this, width / 2, height / 2 + cardHeight / 2 - 38, Math.min(260, cardWidth - 60), 42, needsRecovery ? 'OPEN RECOVERY OPTIONS' : 'RETURN TO HABITAT', needsRecovery ? 0xff8fcf : 0x7af6bd).setDepth(304);

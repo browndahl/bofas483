@@ -9,9 +9,10 @@ import {
 } from '../rendering/presentation';
 import { BUILDINGS, buildingCapacity, buildingDisplayName, materialDeliveryRatio } from '../simulation/building';
 import { COLONY_OVERLAYS } from '../simulation/colonyManagement';
+import { REGIONS } from '../simulation/expeditions';
 import { personalityLabels } from '../simulation/personality';
 import { contextualVocalization, voicePitch, type CreatureMood, type VoiceContext } from '../simulation/vocalization';
-import type { BuildingKind, BuildingState, CreatureState, DirectOrderKind, WorldState } from '../simulation/worldState';
+import type { BuildingKind, BuildingState, CreatureState, DirectOrderKind, RegionId, WorldState } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
 import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
 
@@ -55,11 +56,15 @@ export class WorldScene extends Phaser.Scene {
   private views = new Map<string, CreatureView>();
   private creaturesById = new Map<string, CreatureState>();
   private buildingViews = new Map<string, BuildingView>();
+  private habitatImage!: Phaser.GameObjects.Image;
   private pollutionGraphics!: Phaser.GameObjects.Graphics;
   private relationshipGraphics!: Phaser.GameObjects.Graphics;
   private pathGraphics!: Phaser.GameObjects.Graphics;
   private weatherGraphics!: Phaser.GameObjects.Graphics;
   private managementGraphics!: Phaser.GameObjects.Graphics;
+  private regionalGraphics!: Phaser.GameObjects.Graphics;
+  private regionalLabels: Phaser.GameObjects.Text[] = [];
+  private regionalSignature = '';
   private managementLabels: Phaser.GameObjects.Text[] = [];
   private managementToolbar?: Phaser.GameObjects.Container;
   private managementToolbarText?: Phaser.GameObjects.Text;
@@ -109,6 +114,7 @@ export class WorldScene extends Phaser.Scene {
     this.pollutionGraphics = this.add.graphics().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
     this.relationshipGraphics = this.add.graphics().setDepth(8).setBlendMode(Phaser.BlendModes.ADD);
     this.pathGraphics = this.add.graphics().setDepth(1);
+    this.regionalGraphics = this.add.graphics().setDepth(5);
     this.managementGraphics = this.add.graphics().setDepth(9).setBlendMode(Phaser.BlendModes.ADD);
     this.weatherGraphics = this.add.graphics().setDepth(4).setBlendMode(Phaser.BlendModes.ADD);
     this.dayOverlay = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_WIDTH, WORLD_HEIGHT, 0x08152a, 0).setDepth(40).setBlendMode(Phaser.BlendModes.MULTIPLY);
@@ -135,7 +141,7 @@ export class WorldScene extends Phaser.Scene {
   }
   private baseZoom() { return Phaser.Math.Clamp(Math.max(this.scale.width / WORLD_WIDTH, this.scale.height / WORLD_HEIGHT), 0.55, 1.25); }
   private drawHabitat() {
-    this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'habitat-pixel-map').setDisplaySize(WORLD_WIDTH, WORLD_HEIGHT).setDepth(0);
+    this.habitatImage = this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'habitat-pixel-map').setDisplaySize(WORLD_WIDTH, WORLD_HEIGHT).setDepth(0);
     const frame = this.add.graphics().setDepth(1);
     frame.lineStyle(5, 0x3a2918, 0.75).strokeRect(6, 6, WORLD_WIDTH - 12, WORLD_HEIGHT - 12);
     frame.lineStyle(2, 0xc9aa64, 0.35).strokeRect(13, 13, WORLD_WIDTH - 26, WORLD_HEIGHT - 26);
@@ -217,6 +223,7 @@ export class WorldScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-U', () => this.game.events.emit('toast', gameStore.undoLastBuild() ? 'Recent construction undone · 80% of materials returned' : 'Nothing recent is safe to undo'));
     this.input.keyboard?.on('keydown-O', () => this.cycleManagementOverlay());
     this.input.keyboard?.on('keydown-R', () => this.cycleManagementOrder());
+    this.input.keyboard?.on('keydown-M', () => this.cycleActiveRegion());
     this.input.keyboard?.on('keydown-X', () => {
       if (gameStore.clearDirectOrder(this.selectedId)) this.game.events.emit('toast', 'Selected Luma returned to autonomy');
     });
@@ -234,7 +241,13 @@ export class WorldScene extends Phaser.Scene {
   }
   private refreshManagementToolbar() {
     this.managementToolbar?.setPosition(Math.max(206, this.scale.width - 206), this.scale.width < 650 ? 154 : 104);
-    this.managementToolbarText?.setText(`OVERLAY ${this.state.livingWorld.management.overlay.toUpperCase()} [O]  ·  ORDER ${(this.managementOrderMode ?? 'none').toUpperCase()} [R]  ·  CLEAR [X]`);
+    this.managementToolbarText?.setText(`REGION ${REGIONS[this.state.livingWorld.activeRegion].glyph} [M]  ·  OVERLAY ${this.state.livingWorld.management.overlay.toUpperCase()} [O]  ·  ORDER ${(this.managementOrderMode ?? 'none').toUpperCase()} [R]`);
+  }
+  private cycleActiveRegion() {
+    const regions = this.state.livingWorld.unlockedRegions;
+    const current = Math.max(0, regions.indexOf(this.state.livingWorld.activeRegion));
+    const next = regions[(current + 1) % regions.length] ?? 'lumen-field';
+    if (gameStore.setActiveRegion(next)) this.game.events.emit('toast', `${REGIONS[next].name} · ${next === 'lumen-field' ? 'home habitat' : 'regional field view'}`);
   }
   private cycleManagementOverlay() {
     const current = COLONY_OVERLAYS.indexOf(this.state.livingWorld.management.overlay);
@@ -286,6 +299,10 @@ export class WorldScene extends Phaser.Scene {
     if (creature) { this.selectedId = id; this.syncState(this.state); this.cameras.main.pan(creature.x, creature.y, 420, 'Sine.easeInOut'); this.game.events.emit('creature-selected', creature); }
   };
   private handleBuildSelect = (kind: BuildingKind) => {
+    if (this.state.livingWorld.activeRegion !== 'lumen-field') {
+      this.game.events.emit('toast', 'Return to Lumen Field [M] to place habitat facilities');
+      return;
+    }
     this.placementKind = kind;
     this.placementGhost?.destroy();
     const def = BUILDINGS[kind];
@@ -576,7 +593,7 @@ export class WorldScene extends Phaser.Scene {
       let view = this.views.get(creature.id);
       if (!view) { view = this.createCreatureView(creature); this.views.set(creature.id, view); }
       this.input.setDraggable(view.container, state.livingWorld.management.overlay === 'orders');
-      view.container.setVisible(!creature.expeditionId);
+      view.container.setVisible(this.creatureVisibleInActiveRegion(creature, state));
       if (view.lastAlive && !creature.alive) { if (state.livingWorld.settings.screenShake) this.cameras.main.shake(400, 0.006); this.game.events.emit('glitch', state.livingWorld.settings.reducedMotion ? 0.25 : 0.9); }
       if (view.lastName !== creature.name) { view.lastName = creature.name; this.voiceCreature(creature, 'rename'); }
       if (view.lastTask !== creature.task) {
@@ -598,8 +615,12 @@ export class WorldScene extends Phaser.Scene {
     });
     this.buildingViews.forEach((view, id) => {
       const building = state.buildings.find((item) => item.id === id);
-      if (building) view.container.setData('signature', `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}:${Math.floor(materialDeliveryRatio(building) * 5)}:${Math.floor(building.durability / 10)}:${building.maintenanceFunded}`);
+      if (building) {
+        view.container.setData('signature', `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}:${Math.floor(materialDeliveryRatio(building) * 5)}:${Math.floor(building.durability / 10)}:${building.maintenanceFunded}`);
+        view.container.setVisible(state.livingWorld.activeRegion === 'lumen-field');
+      }
     });
+    this.drawRegionalView(state);
     this.drawPaths(state);
     this.drawManagementOverlay(state);
     this.drawPollution(state);
@@ -611,6 +632,7 @@ export class WorldScene extends Phaser.Scene {
     const view = this.cameras.main.worldView;
     const visibleAt = (x: number, y: number, margin = 160) => x >= view.left - margin && x <= view.right + margin && y >= view.top - margin && y <= view.bottom + margin;
     this.refreshManagementToolbar();
+    if (state.livingWorld.activeRegion !== 'lumen-field') return;
     if (overlay === 'none') return;
     const label = (x: number, y: number, value: string, color: number) => {
       const node = crisp(this.add.text(x, y, value, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: Phaser.Display.Color.IntegerToColor(color).rgba, backgroundColor: '#241b12dd', padding: { x: 5, y: 3 }, align: 'center' })).setOrigin(0.5).setDepth(12);
@@ -680,6 +702,7 @@ export class WorldScene extends Phaser.Scene {
     }
   }
   private drawPaths(state: WorldState) {
+    if (state.livingWorld.activeRegion !== 'lumen-field') { this.pathGraphics.clear(); this.buildingSignature = ''; return; }
     const signature = state.buildings.map((building) => `${building.id}:${Math.round(building.x)}:${Math.round(building.y)}:${building.active}`).join('|');
     if (signature === this.buildingSignature) return; this.buildingSignature = signature; this.pathGraphics.clear();
     const connected = state.buildings.filter((building) => building.active);
@@ -692,6 +715,7 @@ export class WorldScene extends Phaser.Scene {
     });
   }
   private drawPollution(state: WorldState) {
+    if (state.livingWorld.activeRegion !== 'lumen-field') { this.pollutionGraphics.clear(); this.pollutionSignature = ''; return; }
     const signature = state.pollution.map((value) => Math.floor(value / 3)).join(',');
     if (signature === this.pollutionSignature) return;
     this.pollutionSignature = signature;
@@ -707,6 +731,58 @@ export class WorldScene extends Phaser.Scene {
         for (let p = 0; p < 5; p++) this.pollutionGraphics.fillRect(x - cw / 2 + ((p * 31 + index * 17) % Math.max(8, cw - 8)), y - ch / 2 + ((p * 19 + index * 29) % Math.max(8, ch - 8)), 6, 6);
       }
     });
+  }
+  private creatureVisibleInActiveRegion(creature: CreatureState, state = this.state) {
+    if (!creature.alive) return true;
+    if (state.livingWorld.activeRegion === 'lumen-field') return !creature.expeditionId;
+    const outpost = state.livingWorld.outposts.find((candidate) => candidate.regionId === state.livingWorld.activeRegion);
+    return creature.expeditionId === outpost?.id;
+  }
+  private drawRegionalView(state: WorldState) {
+    const regionId = state.livingWorld.activeRegion;
+    const progress = state.livingWorld.regionProgress[regionId];
+    const outpost = state.livingWorld.outposts.find((candidate) => candidate.regionId === regionId);
+    const route = state.livingWorld.supplyRoutes.find((candidate) => candidate.regionId === regionId);
+    const activeExpedition = state.livingWorld.expeditions.find((expedition) => expedition.regionId === regionId && expedition.status === 'active');
+    const expeditionTravel = activeExpedition ? Phaser.Math.Clamp((state.time - activeExpedition.startedAt) / Math.max(1, activeExpedition.returnAt - activeExpedition.startedAt), 0, 1) : 0;
+    const signature = `${regionId}:${Math.floor(progress.scouting / 5)}:${outpost?.staffIds.length ?? 0}:${Math.floor(outpost?.condition ?? 0)}:${route?.active}:${activeExpedition?.id ?? ''}:${Math.floor(expeditionTravel * 20)}`;
+    if (signature === this.regionalSignature) return;
+    this.regionalSignature = signature; this.regionalGraphics.clear();
+    this.regionalLabels.forEach((label) => label.destroy()); this.regionalLabels = [];
+    this.habitatImage.clearTint();
+    if (regionId === 'lumen-field') return;
+    const colors: Record<Exclude<RegionId, 'lumen-field'>, { tint: number; veil: number; accent: number }> = {
+      'whisper-grove': { tint: 0xa9d878, veil: 0x163d20, accent: 0xc8ff92 },
+      'mirror-marsh': { tint: 0x73bed0, veil: 0x133642, accent: 0x9fefff },
+      'old-signal-ridge': { tint: 0xc2a7d8, veil: 0x322948, accent: 0xe2c6ff },
+      'aurora-basin': { tint: 0xffb7df, veil: 0x44244b, accent: 0xffd5f2 }
+    };
+    const palette = colors[regionId]; this.habitatImage.setTint(palette.tint);
+    this.regionalGraphics.fillStyle(palette.veil, 0.25).fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    for (let index = 0; index < Math.max(0, Math.ceil((100 - progress.scouting) / 8)); index++) {
+      const x = 80 + (index * 223 + regionId.length * 31) % 1450; const y = 110 + (index * 157 + regionId.length * 53) % 790;
+      this.regionalGraphics.fillStyle(0x07110d, 0.22).fillCircle(x, y, 105 + index % 4 * 24);
+    }
+    this.regionalGraphics.lineStyle(5, palette.accent, 0.3).strokeCircle(800, 520, 118);
+    this.regionalGraphics.fillStyle(palette.accent, 0.1).fillCircle(800, 520, 100);
+    if (outpost) {
+      this.regionalGraphics.fillStyle(0x3a2918, 0.95).fillRect(724, 456, 152, 92);
+      this.regionalGraphics.lineStyle(4, palette.accent, 0.75).strokeRect(724, 456, 152, 92);
+      this.regionalGraphics.fillStyle(palette.accent, 0.85).fillRect(746, 480, 108, 14);
+      this.regionalGraphics.fillStyle(outpost.condition < 45 ? 0xff735f : 0x7af6bd, 0.9).fillRect(746, 511, Math.max(5, 108 * outpost.condition / 100), 8);
+    }
+    if (route?.active) {
+      this.regionalGraphics.lineStyle(9, palette.accent, 0.18).lineBetween(800, 520, 1530, 135);
+      this.regionalGraphics.lineStyle(3, palette.accent, 0.72).lineBetween(800, 520, 1530, 135);
+      for (let index = 0; index < 6; index++) this.regionalGraphics.fillStyle(0xfff0a8, 0.85).fillCircle(900 + index * 105, 467 - index * 54, 5);
+    }
+    if (activeExpedition) {
+      this.regionalGraphics.lineStyle(3, 0x65c7ff, 0.65).lineBetween(90, 845, 800, 520);
+      this.regionalGraphics.fillStyle(0x65c7ff, 1).fillCircle(90 + 710 * expeditionTravel, 845 - 325 * expeditionTravel, 12);
+    }
+    const title = crisp(this.add.text(52, 42, `${REGIONS[regionId].glyph}  ${REGIONS[regionId].name.toUpperCase()}  ·  ${Math.floor(progress.scouting)}% SCOUTED  ·  ${progress.hazard.toUpperCase()} HAZARD`, { fontFamily: DISPLAY_FONT, fontSize: '13px', color: '#fff1ba', backgroundColor: '#281f20dd', padding: { x: 9, y: 5 }, letterSpacing: 1 })).setDepth(13);
+    const relay = crisp(this.add.text(800, 405, outpost ? `${outpost.name.toUpperCase()}\n${outpost.staffIds.length} STAFF · ${route?.active ? 'ROUTE ACTIVE' : 'LOCAL STORAGE'}` : 'UNSETTLED REGION\nSCOUT TO ESTABLISH A RELAY', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#fff0ba', backgroundColor: '#281f20dd', padding: { x: 8, y: 5 }, align: 'center' })).setOrigin(0.5).setDepth(13);
+    this.regionalLabels.push(title, relay);
   }
   private emitWorldParticles(x: number, y: number, color: number, count: number, radius: number) {
     const settings = this.state.livingWorld.settings;
@@ -933,9 +1009,10 @@ export class WorldScene extends Phaser.Scene {
       const dx = creature.x - view.container.x; const dy = creature.y - view.container.y;
       if (this.managementDragId !== creature.id) { view.container.x += dx * smoothing; view.container.y += dy * smoothing; }
       const inView = view.container.x > camera.worldView.left - 100 && view.container.x < camera.worldView.right + 100 && view.container.y > camera.worldView.top - 100 && view.container.y < camera.worldView.bottom + 100;
-      view.container.setVisible(inView && !creature.expeditionId);
+      const regionVisible = this.creatureVisibleInActiveRegion(creature);
+      view.container.setVisible(inView && regionVisible);
       view.label.setVisible(inView && ((camera.zoom > 0.68 && this.state.creatures.length < 90) || creature.id === this.selectedId));
-      if (!inView || creature.expeditionId || (this.frameIndex + index) % budget.animationStride !== 0) return;
+      if (!inView || !regionVisible || (this.frameIndex + index) % budget.animationStride !== 0) return;
       const phase = Number(creature.id.replace(/\D/g, '')) * 0.71;
       const motionScale = this.state.livingWorld.settings.reducedMotion ? 0.25 : 1;
       const moving = Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y) > 12 || Math.hypot(dx, dy) > 1;
@@ -960,7 +1037,8 @@ export class WorldScene extends Phaser.Scene {
     this.buildingViews.forEach((view, id) => {
       const building = this.state.buildings.find((candidate) => candidate.id === id); if (!building) return;
       const inView = building.x > camera.worldView.left - 140 && building.x < camera.worldView.right + 140 && building.y > camera.worldView.top - 120 && building.y < camera.worldView.bottom + 120;
-      view.container.setVisible(inView); if (!inView) return;
+      const homeVisible = this.state.livingWorld.activeRegion === 'lumen-field';
+      view.container.setVisible(homeVisible && inView); if (!homeVisible || !inView) return;
       const phase = (Number(building.id.replace(/\D/g, '')) || 1) * 0.83; const frequency = buildingMotionFrequency(building.kind); const cycle = Math.sin(time * frequency + phase);
       const operating = building.active && this.state.creatures.some((creature) => creature.alive && creature.destinationBuildingId === building.id && creature.isBeingServed);
       view.core.setScale(0.9 + (cycle + 1) * (operating ? 0.16 : 0.07)).setAlpha(operating ? 0.82 + cycle * 0.16 : 0.48 + cycle * 0.14);
@@ -983,7 +1061,7 @@ export class WorldScene extends Phaser.Scene {
     this.scale.off('resize', this.handleResize, this);
     this.input.keyboard?.off('keydown-ESC');
     this.input.keyboard?.off('keydown-P'); this.input.keyboard?.off('keydown-SPACE'); this.input.keyboard?.off('keydown-ONE'); this.input.keyboard?.off('keydown-TWO'); this.input.keyboard?.off('keydown-THREE'); this.input.keyboard?.off('keydown-G'); this.input.keyboard?.off('keydown-U');
-    this.input.keyboard?.off('keydown-O'); this.input.keyboard?.off('keydown-R');
+    this.input.keyboard?.off('keydown-O'); this.input.keyboard?.off('keydown-R'); this.input.keyboard?.off('keydown-M');
     this.input.keyboard?.off('keydown-X');
     this.cancelPlacement(false);
     if (this.audioContext && this.audioContext.state !== 'closed') void this.audioContext.close();

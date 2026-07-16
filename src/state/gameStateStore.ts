@@ -15,6 +15,7 @@ import { resolvePersonalRequest, resolveStoryChoice } from '../simulation/colony
 import { addJournal, RESEARCH_BRANCHES } from '../simulation/livingWorld';
 import { applyManagementPreset } from '../simulation/colonyManagement';
 import { recoverSilentColony } from '../simulation/recovery';
+import { assignOutpostStaff, createSupplyRoute, establishOutpost, resolveRegionalVisitor } from '../simulation/regionalWorld';
 import type {
   BuildingKind,
   ColonyOverlay,
@@ -258,6 +259,33 @@ class GameStateStore {
   resolveExpedition(id: string, choice: ExpeditionChoice) {
     const next = structuredClone(this.state);
     if (!resolveExpeditionDecision(next, id, choice)) return false;
+    this.set(next); return true;
+  }
+  setActiveRegion(regionId: RegionId) {
+    const next = structuredClone(this.state);
+    if (!next.livingWorld.unlockedRegions.includes(regionId)) return false;
+    next.livingWorld.activeRegion = regionId;
+    appendWorldEvent(next, { type: 'view_region', at: next.time, payload: { regionId } });
+    this.set(next); return true;
+  }
+  establishOutpost(regionId: Exclude<RegionId, 'lumen-field'>) {
+    const next = structuredClone(this.state); const result = establishOutpost(next, regionId);
+    if (result.ok) this.set(next); else this.lastActionError = result.reason ?? 'Outpost unavailable';
+    return result;
+  }
+  toggleOutpostStaff(outpostId: string, creatureId: string) {
+    const next = structuredClone(this.state);
+    if (!assignOutpostStaff(next, outpostId, creatureId)) return false;
+    this.set(next); return true;
+  }
+  toggleSupplyRoute(outpostId: string) {
+    const next = structuredClone(this.state); const result = createSupplyRoute(next, outpostId);
+    if (result.ok) this.set(next); else this.lastActionError = result.reason ?? 'Route unavailable';
+    return result;
+  }
+  answerRegionalVisitor(visitorId: string, invite: boolean) {
+    const next = structuredClone(this.state);
+    if (!resolveRegionalVisitor(next, visitorId, invite)) return false;
     this.set(next); return true;
   }
   answerPersonalRequest(id: string, choice: PersonalRequestChoice) {

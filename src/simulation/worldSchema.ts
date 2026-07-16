@@ -80,13 +80,37 @@ const management = z.object({
     queued: z.number().int().nonnegative(), averageNeed: finite.min(0).max(100)
   })).max(48).optional()
 });
+const regionId = z.enum(['lumen-field', 'whisper-grove', 'mirror-marsh', 'old-signal-ridge', 'aurora-basin']);
+const regionProgress = z.object({
+  regionId, scouting: finite.min(0).max(100), status: z.enum(['locked', 'permitted', 'scouted', 'settled']),
+  hazard: z.enum(['none', 'thorns', 'flood', 'storm', 'radiance']),
+  discovered: z.array(z.enum(['seed-vault', 'memory-ruin', 'signal-array', 'living-archive'])).max(4),
+  preserved: z.boolean(), visits: z.number().int().nonnegative()
+});
+const outpost = z.object({
+  id: z.string().max(80), regionId: z.enum(['whisper-grove', 'mirror-marsh', 'old-signal-ridge', 'aurora-basin']),
+  name: z.string().max(100), level: z.number().int().min(1).max(3), condition: finite.min(0).max(100),
+  staffIds: z.array(z.string().max(40)).max(4), storage: z.object({ glow: finite.nonnegative(), alloy: finite.nonnegative() }),
+  storageCapacity: finite.positive(), supplies: z.object({ glow: finite.nonnegative(), alloy: finite.nonnegative() }), lastTickAt: finite.nonnegative()
+});
+const supplyRoute = z.object({
+  id: z.string().max(80), regionId: z.enum(['whisper-grove', 'mirror-marsh', 'old-signal-ridge', 'aurora-basin']),
+  active: z.boolean(), throughput: finite.min(0).max(2), risk: finite.min(0).max(1), nextDeliveryAt: finite.nonnegative(),
+  delivered: z.object({ glow: finite.nonnegative(), alloy: finite.nonnegative() })
+});
+const regionalVisitor = z.object({
+  id: z.string().max(100), regionId: z.enum(['whisper-grove', 'mirror-marsh', 'old-signal-ridge', 'aurora-basin']),
+  name: z.string().max(80), voiceStyle: z.enum(['chirpy', 'round', 'whispery', 'raspy', 'musical']), trait: z.string().max(60),
+  arrivedAt: finite.nonnegative(), expiresAt: finite.nonnegative(), status: z.enum(['waiting', 'joined', 'departed'])
+});
 const livingWorld = z.object({
   reputation: finite.nonnegative(), level: z.number().int().min(1).max(5), title: z.string().max(100), researchPoints: finite.nonnegative(), research,
   unlockedRegions: z.array(z.enum(['lumen-field', 'whisper-grove', 'mirror-marsh', 'old-signal-ridge', 'aurora-basin'])).max(5), rareResources: z.object({ memoryCrystal: z.number().int().nonnegative(), wildSeed: z.number().int().nonnegative() }),
   expeditions: z.array(z.object({
     id: z.string().min(1).max(80), regionId: z.enum(['lumen-field', 'whisper-grove', 'mirror-marsh', 'old-signal-ridge', 'aurora-basin']), creatureIds: z.array(z.string().max(40)).min(1).max(3),
     startedAt: finite.nonnegative(), returnAt: finite.nonnegative(), status: z.enum(['active', 'decision', 'complete']), risk: z.enum(['low', 'moderate', 'high', 'severe']),
-    outcome: z.string().max(500).optional(), success: z.boolean().optional(), glowReward: finite.nonnegative().optional(), alloyReward: finite.nonnegative().optional(), choice: z.enum(['preserve', 'salvage']).optional()
+    outcome: z.string().max(500).optional(), success: z.boolean().optional(), glowReward: finite.nonnegative().optional(), alloyReward: finite.nonnegative().optional(), choice: z.enum(['preserve', 'salvage']).optional(),
+    progress: finite.min(0).max(1).optional(), scoutingReward: finite.min(0).max(100).optional()
   })).max(20).optional(),
   day: z.number().int().min(1), dayTime: finite.min(0).max(1), season: z.enum(['bloom', 'suncrest', 'amberfall', 'frostquiet']), weather: z.enum(['clear', 'mist', 'rain', 'wind', 'storm']),
   weatherTimer: finite, lastDailyEventDay: z.number().int().min(0),
@@ -111,7 +135,13 @@ const livingWorld = z.object({
   }).optional(),
   lastRequestDay: z.number().int().min(0).optional(), lastStoryDay: z.number().int().min(0).optional(), lastGroupActivityAt: finite.nonnegative().optional(),
   challenges: z.array(z.object({ id: z.string().max(100), title: z.string().max(100), description: z.string().max(240), progress: finite.nonnegative(), target: finite.positive(), complete: z.boolean() })).max(20),
-  settings, management: management.optional(), telemetry: z.object({ averageTickMs: finite.nonnegative(), peakTickMs: finite.nonnegative(), fps: finite.nonnegative(), creatures: z.number().int().nonnegative(), visibleCreatures: z.number().int().nonnegative(), pathRecoveries: z.number().int().nonnegative() }), saveVersion: z.number().int().min(2)
+  settings, management: management.optional(),
+  activeRegion: regionId.optional(),
+  regionProgress: z.record(regionProgress).optional(),
+  outposts: z.array(outpost).max(4).optional(),
+  supplyRoutes: z.array(supplyRoute).max(4).optional(),
+  regionalVisitors: z.array(regionalVisitor).max(40).optional(),
+  telemetry: z.object({ averageTickMs: finite.nonnegative(), peakTickMs: finite.nonnegative(), fps: finite.nonnegative(), creatures: z.number().int().nonnegative(), visibleCreatures: z.number().int().nonnegative(), pathRecoveries: z.number().int().nonnegative() }), saveVersion: z.number().int().min(2)
 });
 
 const schema = z.object({

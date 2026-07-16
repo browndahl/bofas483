@@ -35,6 +35,9 @@ function isObjectiveMet(id: string, world: WorldState, living: number): boolean 
     case 'industry': return world.buildings.some((building) => building.kind === 'extractor');
     case 'first-expedition': return world.events.some((event) => event.type === 'expedition_complete');
     case 'expedition-decision': return world.events.some((event) => event.type === 'expedition_decision');
+    case 'scout-region': return Object.entries(world.livingWorld.regionProgress).some(([regionId, progress]) => regionId !== 'lumen-field' && progress.scouting >= 100);
+    case 'first-outpost': return world.livingWorld.outposts.length > 0;
+    case 'first-route': return world.livingWorld.supplyRoutes.some((route) => route.active);
     case 'advanced-research': return Object.values(world.livingWorld.research).some((level) => level >= 3);
     case 'advanced-upgrade': return world.buildings.some((building) => building.level >= 3);
     case 'region-3': return world.livingWorld.unlockedRegions.length >= 3;
