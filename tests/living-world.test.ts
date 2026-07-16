@@ -19,6 +19,7 @@ import { createInitialWorld, makeCreature } from '../src/simulation/worldState';
 import { parseWorldState } from '../src/simulation/worldSchema';
 import { relationshipTone, resolvePersonalRequest, resolveStoryChoice, updateColonyStories } from '../src/simulation/colonyStories';
 import { creaturePose, presentationBudget, soundscapeMood, soundscapeNotes } from '../src/rendering/presentation';
+import { canSpendReserve, colonyForecast, colonyJobQueue, managedTask, schedulePhase } from '../src/simulation/colonyManagement';
 
 describe('living world progression', () => {
   it('advances day, season, reputation, research, and regional permits', () => {
@@ -151,7 +152,7 @@ describe('living world progression', () => {
     expect(migrated?.livingWorld.personalRequests).toEqual([]);
     expect(migrated?.livingWorld.storyEvents).toEqual([]);
     expect(migrated?.livingWorld.settings.musicVolume).toBeGreaterThan(0);
-    expect(migrated?.livingWorld.saveVersion).toBe(6);
+    expect(migrated?.livingWorld.saveVersion).toBe(7);
     expect(migrated?.creatures[0].history.length).toBeGreaterThan(0);
     expect(migrated?.creatures[0].voiceStyle).toBeTruthy();
   });
@@ -172,7 +173,54 @@ describe('living world progression', () => {
     delete legacy.livingWorld.settings.musicVolume; legacy.livingWorld.saveVersion = 5;
     const migrated = parseWorldState(legacy);
     expect(migrated?.livingWorld.settings.musicVolume).toBe(0.3);
-    expect(migrated?.livingWorld.saveVersion).toBe(6);
+    expect(migrated?.livingWorld.saveVersion).toBe(7);
+  });
+
+  it('migrates colony management, schedules, crews, and staffing preferences', () => {
+    const legacy = structuredClone(createInitialWorld(13)) as unknown as {
+      livingWorld: Record<string, unknown> & { saveVersion: number };
+      creatures: Array<Record<string, unknown>>;
+      buildings: Array<Record<string, unknown>>;
+    };
+    legacy.buildings.push(createBuilding('nutrient-bed', 700, 500, 1) as unknown as Record<string, unknown>);
+    delete legacy.livingWorld.management; legacy.livingWorld.saveVersion = 6;
+    delete legacy.creatures[0].schedule; delete legacy.creatures[0].managementGroupId; delete legacy.buildings[0].preferredOperatorIds;
+    const migrated = parseWorldState(legacy);
+    expect(migrated?.livingWorld.management.priorities.medical).toBe(3);
+    expect(migrated?.creatures[0].schedule).toBe('balanced');
+    expect(migrated?.creatures[0].managementGroupId).toBeTruthy();
+    expect(migrated?.buildings[0].preferredOperatorIds).toEqual([]);
+    expect(migrated?.livingWorld.saveVersion).toBe(7);
+  });
+
+  it('forecasts capacity and produces an explainable work queue', () => {
+    const world = createInitialWorld(14);
+    world.creatures.push(makeCreature('c2', 550, 500), makeCreature('c3', 600, 500), makeCreature('c4', 650, 500));
+    world.creatures[0].needs.hunger = 18;
+    const project = createBuilding('nutrient-bed', 720, 500, 1); project.constructing = true; project.active = false; project.constructionProgress = 0;
+    world.buildings.push(project);
+    const forecast = colonyForecast(world); const queue = colonyJobQueue(world);
+    expect(forecast.food.status).toBe('shortage');
+    expect(queue.some((entry) => entry.kind === 'care' && entry.creatureId === 'c1')).toBe(true);
+    expect(queue.some((entry) => entry.kind === 'construction')).toBe(true);
+  });
+
+  it('protects resource reserves from automatic spending', () => {
+    const world = createInitialWorld(15);
+    expect(canSpendReserve(world, { glow: 60, alloy: 24 })).toBe(false);
+    world.livingWorld.management.policies.protectReserves = false;
+    expect(canSpendReserve(world, { glow: 60, alloy: 24 })).toBe(true);
+  });
+
+  it('uses safe schedules, emergency overrides, and shift limits', () => {
+    const world = createInitialWorld(16); const creature = world.creatures[0];
+    world.livingWorld.dayTime = 0.05; creature.needs.energy = 70;
+    expect(schedulePhase(world.livingWorld.dayTime, creature.schedule)).toBe('rest');
+    expect(managedTask(world, creature, 'work').task).toBe('sleep');
+    creature.needs.hunger = 20;
+    expect(managedTask(world, creature, 'work').task).toBe('eat');
+    creature.needs.hunger = 90; creature.shiftWork = 90; world.livingWorld.dayTime = 0.5;
+    expect(['sleep', 'play']).toContain(managedTask(world, creature, 'work').task);
   });
 
   it('provides contextual return, baby, social, and critical vocalizations', () => {

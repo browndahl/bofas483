@@ -32,7 +32,8 @@ const creature = z.object({
   history: z.array(z.object({ at: finite, title: z.string().max(100), detail: z.string().max(240) })).max(100).optional(),
   parentId: z.string().max(40).optional(), childrenIds: z.array(z.string().max(40)).max(32).optional(), mentorId: z.string().max(40).optional(),
   favoriteFood: z.string().max(60).optional(), favoriteCompanionId: z.string().max(40).optional(), routeMemory: z.array(vec2).max(12).optional(),
-  voiceStyle: z.enum(['chirpy', 'round', 'whispery', 'raspy', 'musical']).optional(), voiceCooldown: finite.nonnegative().optional(), ageMilestone: z.number().int().min(0).optional(), currentConcern: z.string().max(120).optional(), expeditionId: z.string().max(80).optional()
+  voiceStyle: z.enum(['chirpy', 'round', 'whispery', 'raspy', 'musical']).optional(), voiceCooldown: finite.nonnegative().optional(), ageMilestone: z.number().int().min(0).optional(), currentConcern: z.string().max(120).optional(), expeditionId: z.string().max(80).optional(),
+  schedule: z.enum(['balanced', 'early', 'late', 'flexible']).optional(), managementGroupId: z.string().max(40).optional(), shiftWork: finite.nonnegative().optional(), lastTaskReason: z.string().max(180).optional()
 });
 const building = z.object({
   id: z.string().min(1).max(40), kind: z.enum(['nutrient-bed', 'wash-pool', 'resonance-garden', 'nest', 'extractor', 'clinic']),
@@ -42,7 +43,7 @@ const building = z.object({
   materialsRequired: z.object({ glow: finite.nonnegative(), alloy: finite.nonnegative() }).optional(),
   materialsDelivered: z.object({ glow: finite.nonnegative(), alloy: finite.nonnegative() }).optional(),
   influenceRadius: finite.min(50).max(400).optional(), maintenanceMode: z.enum(['auto', 'manual']).optional(),
-  maintenanceFunded: z.boolean().optional(), lastOperatorId: z.string().max(40).optional()
+  maintenanceFunded: z.boolean().optional(), lastOperatorId: z.string().max(40).optional(), preferredOperatorIds: z.array(z.string().max(40)).max(4).optional()
 });
 const personality = z.object({
   empathy: finite, exploitation: finite, sustainability: finite, curiosity: finite,
@@ -54,6 +55,17 @@ const settings = z.object({
   muted: z.boolean(), voiceVolume: finite.min(0).max(1), ambienceVolume: finite.min(0).max(1), musicVolume: finite.min(0).max(1).optional(), textScale: finite.min(0.8).max(1.5), highContrast: z.boolean(), colorBlind: z.boolean(),
   reducedMotion: z.boolean(), screenShake: z.boolean(), lowPower: z.boolean(), quality: z.enum(['low', 'medium', 'high']), offlineLimitMinutes: z.number().int().min(0).max(240),
   simulationSpeed: z.union([z.literal(1), z.literal(2), z.literal(4)]), paused: z.boolean(), subtitles: z.boolean(), tutorial: z.boolean(), alertLevel: z.enum(['critical', 'important', 'all'])
+});
+const management = z.object({
+  priorities: z.object({
+    medical: z.number().int().min(0).max(3), food: z.number().int().min(0).max(3), cleanliness: z.number().int().min(0).max(3), rest: z.number().int().min(0).max(3),
+    morale: z.number().int().min(0).max(3), maintenance: z.number().int().min(0).max(3), construction: z.number().int().min(0).max(3), industry: z.number().int().min(0).max(3)
+  }),
+  policies: z.object({ emergencyFirst: z.boolean(), repairBeforeConstruction: z.boolean(), protectReserves: z.boolean(), autoStaff: z.boolean() }),
+  minimumReserves: z.object({ glow: finite.nonnegative(), alloy: finite.nonnegative() }),
+  zones: z.array(z.object({ id: z.string().max(40), name: z.string().max(60), kind: z.enum(['home', 'work', 'recreation']), x: finite, y: finite, radius: finite.min(80).max(500), color: z.number().int().nonnegative() })).max(8),
+  groups: z.array(z.object({ id: z.string().max(40), name: z.string().max(60), color: z.number().int().nonnegative(), zoneId: z.string().max(40) })).max(8),
+  autoFundRepairsBelow: finite.min(5).max(80)
 });
 const livingWorld = z.object({
   reputation: finite.nonnegative(), level: z.number().int().min(1).max(5), title: z.string().max(100), researchPoints: finite.nonnegative(), research,
@@ -86,7 +98,7 @@ const livingWorld = z.object({
   }).optional(),
   lastRequestDay: z.number().int().min(0).optional(), lastStoryDay: z.number().int().min(0).optional(), lastGroupActivityAt: finite.nonnegative().optional(),
   challenges: z.array(z.object({ id: z.string().max(100), title: z.string().max(100), description: z.string().max(240), progress: finite.nonnegative(), target: finite.positive(), complete: z.boolean() })).max(20),
-  settings, telemetry: z.object({ averageTickMs: finite.nonnegative(), peakTickMs: finite.nonnegative(), fps: finite.nonnegative(), creatures: z.number().int().nonnegative(), visibleCreatures: z.number().int().nonnegative(), pathRecoveries: z.number().int().nonnegative() }), saveVersion: z.number().int().min(2)
+  settings, management: management.optional(), telemetry: z.object({ averageTickMs: finite.nonnegative(), peakTickMs: finite.nonnegative(), fps: finite.nonnegative(), creatures: z.number().int().nonnegative(), visibleCreatures: z.number().int().nonnegative(), pathRecoveries: z.number().int().nonnegative() }), saveVersion: z.number().int().min(2)
 });
 
 const schema = z.object({

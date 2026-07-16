@@ -2,6 +2,7 @@ import type { BuildingState, CreatureState, GameEvent, JournalEntry, LivingWorld
 import { appendWorldEvent } from './worldState';
 import { updateExpeditions } from './expeditions';
 import { updateColonyStories } from './colonyStories';
+import { colonyForecast, createColonyManagement, ensureColonyManagement } from './colonyManagement';
 
 export const RESEARCH_BRANCHES: Record<ResearchBranch, { name: string; description: string; bonus: string }> = {
   care: { name: 'CARE', description: 'Gentler recovery and stronger offline safety.', bonus: '+5% care efficiency per level' },
@@ -61,7 +62,8 @@ export function createLivingWorld(): LivingWorldState {
       subtitles: true, tutorial: true, alertLevel: 'all'
     },
     telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 },
-    saveVersion: 6
+    management: createColonyManagement(),
+    saveVersion: 7
   };
 }
 
@@ -72,6 +74,7 @@ export function ensureLivingWorld(world: WorldState) {
   world.livingWorld.rareResources = { ...defaults.rareResources, ...world.livingWorld.rareResources };
   world.livingWorld.settings = { ...defaults.settings, ...world.livingWorld.settings };
   world.livingWorld.telemetry = { ...defaults.telemetry, ...world.livingWorld.telemetry };
+  world.livingWorld.management = { ...defaults.management, ...world.livingWorld.management };
   world.livingWorld.unlockedRegions ??= ['lumen-field'];
   world.livingWorld.expeditions ??= [];
   world.livingWorld.alerts ??= [];
@@ -88,7 +91,8 @@ export function ensureLivingWorld(world: WorldState) {
   if ((world.livingWorld.saveVersion ?? 2) < 3) {
     world.livingWorld.settings.textScale = Math.max(1.1, world.livingWorld.settings.textScale);
   }
-  world.livingWorld.saveVersion = 6;
+  ensureColonyManagement(world);
+  world.livingWorld.saveVersion = 7;
 }
 
 export function addJournal(world: WorldState, entry: Omit<JournalEntry, 'id' | 'at'> & { id?: string; at?: number }) {
@@ -146,7 +150,8 @@ function updateAlerts(world: WorldState) {
   const request = world.livingWorld.personalRequests.find((item) => item.status === 'active');
   const story = world.livingWorld.storyEvents.find((item) => item.status === 'decision');
   const worn = world.buildings.find((building) => !building.constructing && building.durability < 35 && !building.maintenanceFunded);
-  const managed = new Set(['silent-colony', 'food-shortage', 'illness', 'loneliness', 'overcrowding', 'blocked-route', 'maintenance-shortage']);
+  const forecast = colonyForecast(world);
+  const managed = new Set(['silent-colony', 'food-shortage', 'illness', 'loneliness', 'overcrowding', 'blocked-route', 'maintenance-shortage', 'forecast-food', 'forecast-beds', 'forecast-clinic']);
   const active = new Set<string>();
   if (!living.length) active.add('silent-colony');
   if (hungry) active.add('food-shortage');
@@ -155,6 +160,9 @@ function updateAlerts(world: WorldState) {
   if (queues.length) active.add('overcrowding');
   if (blocked) active.add('blocked-route');
   if (worn) active.add('maintenance-shortage');
+  if (forecast.food.status === 'shortage') active.add('forecast-food');
+  if (forecast.beds.status === 'shortage') active.add('forecast-beds');
+  if (forecast.clinics.status === 'shortage' && forecast.clinics.demand > 0) active.add('forecast-clinic');
   if (request) active.add(`personal-request:${request.id}`);
   if (story) active.add(`story-decision:${story.id}`);
   world.livingWorld.alerts = world.livingWorld.alerts.filter((alert) => {
@@ -174,6 +182,9 @@ function updateAlerts(world: WorldState) {
   }
   if (blocked) addAlert(world, 'blocked-route', 'warning', `${blocked.name} cannot reach the destination`, `${blocked.name}'s ${blocked.task} route is blocked or overcrowded. Move the obstruction, add facility capacity, or let automatic path recovery retry.`, { creatureId: blocked.id, actionLabel: 'SHOW LUMA' });
   if (worn) addAlert(world, 'maintenance-shortage', worn.durability <= 10 ? 'critical' : 'warning', `${worn.kind.replaceAll('-', ' ')} needs maintenance`, `Durability is ${Math.round(worn.durability)}%. Fund repairs from the building panel or enable automatic maintenance.`, { buildingId: worn.id, actionLabel: 'SHOW BUILDING' });
+  if (forecast.food.status === 'shortage') addAlert(world, 'forecast-food', 'warning', 'Food capacity will fall behind', `Forecast needs ${forecast.food.demand} Dew Loom stations but only ${forecast.food.capacity} are online. Upgrade capacity or build another loom.`);
+  if (forecast.beds.status === 'shortage') addAlert(world, 'forecast-beds', 'warning', 'Rest capacity will fall behind', `Forecast needs ${forecast.beds.demand} archive stations but only ${forecast.beds.capacity} are online.`);
+  if (forecast.clinics.status === 'shortage' && forecast.clinics.demand > 0) addAlert(world, 'forecast-clinic', 'critical', 'Treatment capacity is insufficient', `${forecast.clinics.demand} Luma need treatment but only ${forecast.clinics.capacity} clinic stations are online.`);
   if (request) {
     const creature = world.creatures.find((candidate) => candidate.id === request.creatureId);
     addAlert(world, `personal-request:${request.id}`, 'info', request.title, `${creature?.name ?? 'A Luma'} is waiting for an answer in COLONY → SOCIAL.`, { creatureId: request.creatureId, actionLabel: 'OPEN SOCIAL' });
@@ -266,6 +277,10 @@ export function ensureCreatureHistory(creature: CreatureState) {
   creature.voiceStyle ??= ['chirpy', 'round', 'whispery', 'raspy', 'musical'][Number(creature.id.replace(/\D/g, '')) % 5] as CreatureState['voiceStyle'];
   creature.voiceCooldown ??= 0;
   creature.ageMilestone ??= 0;
+  creature.schedule ??= 'balanced';
+  creature.managementGroupId ??= 'free-chorus';
+  creature.shiftWork ??= 0;
+  creature.lastTaskReason ??= 'Choosing freely from current needs';
 }
 
 export function updateCreatureHistory(creature: CreatureState, seconds: number) {
@@ -298,4 +313,5 @@ export function ensureBuildingLife(building: BuildingState) {
   building.influenceRadius ??= 130;
   building.maintenanceMode ??= 'auto';
   building.maintenanceFunded ??= false;
+  building.preferredOperatorIds ??= [];
 }

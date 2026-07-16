@@ -19,6 +19,10 @@ export type VoiceStyle = 'chirpy' | 'round' | 'whispery' | 'raspy' | 'musical';
 export type RegionId = 'lumen-field' | 'whisper-grove' | 'mirror-marsh' | 'old-signal-ridge' | 'aurora-basin';
 export type ExpeditionStatus = 'active' | 'decision' | 'complete';
 export type ExpeditionChoice = 'preserve' | 'salvage';
+export type ManagementPriorityKey = 'medical' | 'food' | 'cleanliness' | 'rest' | 'morale' | 'maintenance' | 'construction' | 'industry';
+export type ColonyPolicyKey = 'emergencyFirst' | 'repairBeforeConstruction' | 'protectReserves' | 'autoStaff';
+export type CreatureSchedule = 'balanced' | 'early' | 'late' | 'flexible';
+export type SchedulePhase = 'rest' | 'free' | 'work';
 
 export interface Vec2 { x: number; y: number }
 export interface Needs { hunger: number; hygiene: number; happiness: number; health: number; energy: number }
@@ -76,6 +80,10 @@ export interface CreatureState {
   ageMilestone: number;
   currentConcern: string;
   expeditionId?: string;
+  schedule: CreatureSchedule;
+  managementGroupId: string;
+  shiftWork: number;
+  lastTaskReason: string;
 }
 export interface BuildingState {
   id: string;
@@ -96,6 +104,7 @@ export interface BuildingState {
   maintenanceMode: MaintenanceMode;
   maintenanceFunded: boolean;
   lastOperatorId?: string;
+  preferredOperatorIds: string[];
 }
 export interface Resources { glow: number; alloy: number }
 export interface Personality {
@@ -128,6 +137,20 @@ export interface StoryEventState {
 export interface GroupActivityState {
   id: string; kind: 'meal' | 'game' | 'celebration'; creatureIds: string[]; startedAt: number; endsAt: number; center: Vec2;
 }
+export interface ColonyZone { id: string; name: string; kind: 'home' | 'work' | 'recreation'; x: number; y: number; radius: number; color: number }
+export interface ColonyGroup { id: string; name: string; color: number; zoneId: string }
+export interface ColonyManagementState {
+  priorities: Record<ManagementPriorityKey, 0 | 1 | 2 | 3>;
+  policies: Record<ColonyPolicyKey, boolean>;
+  minimumReserves: Resources;
+  zones: ColonyZone[];
+  groups: ColonyGroup[];
+  autoFundRepairsBelow: number;
+}
+export interface JobQueueEntry {
+  id: string; kind: 'care' | 'construction' | 'maintenance' | 'queue'; priority: number; title: string;
+  status: 'active' | 'waiting' | 'blocked'; creatureId?: string; buildingId?: string;
+}
 export interface ExpeditionState {
   id: string;
   regionId: RegionId;
@@ -154,6 +177,7 @@ export interface LivingWorldState {
   personalRequests: PersonalRequestState[]; storyEvents: StoryEventState[]; groupActivity?: GroupActivityState;
   lastRequestDay: number; lastStoryDay: number; lastGroupActivityAt: number;
   challenges: ChallengeState[]; settings: GameSettings; telemetry: { averageTickMs: number; peakTickMs: number; fps: number; creatures: number; visibleCreatures: number; pathRecoveries: number }; saveVersion: number;
+  management: ColonyManagementState;
 }
 export interface WorldState {
   version: 1;
@@ -230,7 +254,11 @@ export function makeCreature(id: string, x: number, y: number, generation = 0, p
     voiceStyle: ['chirpy', 'round', 'whispery', 'raspy', 'musical'][index % 5] as VoiceStyle,
     voiceCooldown: 0,
     ageMilestone: 0,
-    currentConcern: 'Feeling secure'
+    currentConcern: 'Feeling secure',
+    schedule: 'balanced',
+    managementGroupId: ['gentle-shift', 'maker-shift', 'free-chorus'][index % 3],
+    shiftWork: 0,
+    lastTaskReason: 'Choosing freely from current needs'
   };
 }
 
@@ -266,7 +294,24 @@ export function createInitialWorld(seed = Date.now()): WorldState {
       personalRequests: [], storyEvents: [], lastRequestDay: 0, lastStoryDay: 0, lastGroupActivityAt: 0,
       challenges: [],
       settings: { muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, musicVolume: 0.3, textScale: 1.1, highContrast: false, colorBlind: false, reducedMotion: false, screenShake: true, lowPower: false, quality: 'high', offlineLimitMinutes: 15, simulationSpeed: 1, paused: false, subtitles: true, tutorial: true, alertLevel: 'all' },
-      telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 }, saveVersion: 6
+      telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 },
+      management: {
+        priorities: { medical: 3, food: 3, cleanliness: 2, rest: 3, morale: 2, maintenance: 2, construction: 2, industry: 1 },
+        policies: { emergencyFirst: true, repairBeforeConstruction: true, protectReserves: true, autoStaff: true },
+        minimumReserves: { glow: 24, alloy: 12 },
+        zones: [
+          { id: 'north-grove', name: 'North Grove', kind: 'home', x: 570, y: 300, radius: 230, color: 0x7af6bd },
+          { id: 'central-field', name: 'Central Field', kind: 'work', x: 820, y: 525, radius: 260, color: 0xf7bd62 },
+          { id: 'south-meadow', name: 'South Meadow', kind: 'recreation', x: 990, y: 760, radius: 225, color: 0xbf78ff }
+        ],
+        groups: [
+          { id: 'gentle-shift', name: 'Gentle Shift', color: 0x7af6bd, zoneId: 'north-grove' },
+          { id: 'maker-shift', name: 'Maker Shift', color: 0xf7bd62, zoneId: 'central-field' },
+          { id: 'free-chorus', name: 'Free Chorus', color: 0xbf78ff, zoneId: 'south-meadow' }
+        ],
+        autoFundRepairsBelow: 35
+      },
+      saveVersion: 7
     }
   };
 }
