@@ -131,7 +131,7 @@ export function createBuilding(kind: BuildingKind, x: number, y: number, index: 
     id: `b${index}`, kind, x, y, level: 1, active: true, durability: 100,
     constructionProgress: 100, constructing: false, constructionWork: 100,
     materialsRequired: { glow: 0, alloy: 0 }, materialsDelivered: { glow: 0, alloy: 0 },
-    influenceRadius: 130, maintenanceMode: 'auto', maintenanceFunded: false
+    influenceRadius: 130, maintenanceMode: 'auto', maintenanceFunded: false, preferredOperatorIds: []
   };
 }
 

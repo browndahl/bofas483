@@ -257,6 +257,34 @@ describe('environment and navigation', () => {
     expect(world.resources).toEqual(resourcesBefore);
     expect(world.buildings[0].maintenanceFunded).toBe(false);
   });
+  it('protects reserves and repairs before construction when policy requires it', () => {
+    let world = createInitialWorld(44); world.livingWorld.dayTime = 0.5;
+    world.resources = { glow: 28, alloy: 14 };
+    const repair = createBuilding('wash-pool', 700, 500, 1); repair.durability = 20;
+    const project = createBuilding('nutrient-bed', 850, 500, 2); beginBuildingProject(project, 'new', { glow: 25, alloy: 0 });
+    world.buildings.push(repair, project); world.creatures[0].assignedRole = 'builder'; world.creatures[0].needs = { hunger: 90, hygiene: 90, happiness: 90, health: 100, energy: 90 };
+    world = tickWorld(world, 1);
+    expect(world.buildings[0].maintenanceFunded).toBe(false);
+    world.resources = { glow: 100, alloy: 100 };
+    world = tickWorld(world, 1);
+    expect(world.buildings[0].maintenanceFunded).toBe(true);
+    expect(world.creatures[0].task).toBe('maintain');
+  });
+  it('routes preferred operators toward their staffed facility', () => {
+    const world = createInitialWorld(45); world.livingWorld.dayTime = 0.5;
+    const first = createBuilding('nutrient-bed', 680, 500, 1); const staffed = createBuilding('nutrient-bed', 820, 500, 2);
+    staffed.preferredOperatorIds = ['c1']; world.buildings.push(first, staffed);
+    world.creatures[0].x = 750; world.creatures[0].y = 650; world.creatures[0].needs.hunger = 20;
+    const next = tickWorld(world, 0.2);
+    expect(next.creatures[0].destinationBuildingId).toBe(staffed.id);
+  });
+  it('keeps free movement within the assigned crew zone', () => {
+    const world = createInitialWorld(46); const creature = world.creatures[0];
+    creature.schedule = 'flexible'; creature.managementGroupId = 'gentle-shift'; creature.needs = { hunger: 90, hygiene: 90, happiness: 90, health: 100, energy: 90 };
+    creature.target = { x: creature.x, y: creature.y }; creature.navigationPath = [];
+    const next = tickWorld(world, 0.2); const zone = next.livingWorld.management.zones.find((candidate) => candidate.id === 'north-grove')!;
+    expect(Math.hypot(next.creatures[0].target.x - zone.x, next.creatures[0].target.y - zone.y)).toBeLessThanOrEqual(zone.radius);
+  });
 });
 
 describe('state integrity', () => {

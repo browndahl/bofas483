@@ -4,14 +4,25 @@ import { OBJECTIVES } from '../simulation/progression';
 import { ROLE_LABELS, SKILL_KEYS, SKILL_LABELS, skillLevel } from '../simulation/colonyLife';
 import { expeditionResearchCost, REGIONS } from '../simulation/expeditions';
 import { explainCreatureAction, relationshipTone } from '../simulation/colonyStories';
+import {
+  colonyForecast,
+  colonyJobQueue,
+  COLONY_POLICY_KEYS,
+  CREATURE_SCHEDULES,
+  MANAGEMENT_LABELS,
+  MANAGEMENT_PRIORITY_KEYS,
+  schedulePhase
+} from '../simulation/colonyManagement';
+import { BUILDINGS } from '../simulation/building';
 import type { AlertState, CreatureRole, GameSettings, JournalEntry, RegionId, ResearchBranch } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
 import { saveService } from '../services/saveService';
 import { button, panel } from '../ui/hud';
 import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
 
-type Page = 'OVERVIEW' | 'SOCIAL' | 'EXPLORE' | 'RESEARCH' | 'LUMA' | 'HISTORY' | 'SETTINGS' | 'SAVES' | 'CHANGELOG';
-const PAGES: Page[] = ['OVERVIEW', 'SOCIAL', 'EXPLORE', 'RESEARCH', 'LUMA', 'HISTORY', 'SETTINGS', 'SAVES', 'CHANGELOG'];
+type Page = 'OVERVIEW' | 'MANAGE' | 'SOCIAL' | 'EXPLORE' | 'RESEARCH' | 'LUMA' | 'HISTORY' | 'SETTINGS' | 'SAVES' | 'CHANGELOG';
+type ManagementTab = 'POLICIES' | 'ROSTER' | 'JOBS';
+const PAGES: Page[] = ['OVERVIEW', 'MANAGE', 'SOCIAL', 'EXPLORE', 'RESEARCH', 'LUMA', 'HISTORY', 'SETTINGS', 'SAVES', 'CHANGELOG'];
 const ROLES: Array<CreatureRole | 'auto'> = ['auto', 'forager', 'caretaker', 'healer', 'builder', 'researcher', 'explorer'];
 
 export class ColonyScene extends Phaser.Scene {
@@ -24,6 +35,8 @@ export class ColonyScene extends Phaser.Scene {
   private tabs: Phaser.GameObjects.Container[] = [];
   private teamCursor = 0;
   private historyFilter: 'all' | 'relationship' | 'story' | 'life' = 'all';
+  private managementTab: ManagementTab = 'POLICIES';
+  private rosterFilter: CreatureRole | 'all' | 'critical' = 'all';
 
   constructor() { super('ColonyScene'); }
 
@@ -66,6 +79,7 @@ export class ColonyScene extends Phaser.Scene {
     this.content.removeAll(true);
     this.header.setText(`COLONY COMMAND  /  ${this.page}`);
     if (this.page === 'OVERVIEW') this.renderOverview();
+    if (this.page === 'MANAGE') this.renderManagement();
     if (this.page === 'SOCIAL') this.renderSocial();
     if (this.page === 'EXPLORE') this.renderExplore();
     if (this.page === 'RESEARCH') this.renderResearch();
@@ -124,6 +138,73 @@ export class ColonyScene extends Phaser.Scene {
       return;
     }
     gameStore.dismissAlert(alert.id);
+  }
+
+  private renderManagement() {
+    const { width } = this.dimensions(); const compact = width < 600; const management = this.state.livingWorld.management;
+    const tabs: ManagementTab[] = ['POLICIES', 'ROSTER', 'JOBS']; const tabWidth = (width - 10) / 3;
+    tabs.forEach((tab, index) => this.addButton(tabWidth / 2 + index * (tabWidth + 5), 4, tabWidth, tab, this.managementTab === tab ? 0xf7bd62 : 0x65c7ff, () => { this.managementTab = tab; this.renderPage(); }));
+    if (this.managementTab === 'POLICIES') {
+      const forecast = colonyForecast(this.state);
+      this.addHeading(0, 50, '30-MINUTE COLONY FORECAST');
+      this.addText(0, 76, `FOOD ${forecast.food.capacity}/${forecast.food.demand} ${forecast.food.status.toUpperCase()}  ·  BEDS ${forecast.beds.capacity}/${forecast.beds.demand} ${forecast.beds.status.toUpperCase()}  ·  CLINIC ${forecast.clinics.capacity}/${forecast.clinics.demand} ${forecast.clinics.status.toUpperCase()}\nNET / MIN  ${forecast.resourceNet.glowPerMinute >= 0 ? '+' : ''}${forecast.resourceNet.glowPerMinute.toFixed(1)} GLOW  ·  ${forecast.resourceNet.alloyPerMinute >= 0 ? '+' : ''}${forecast.resourceNet.alloyPerMinute.toFixed(1)} ALLOY  ·  PREFERRED STAFF ${forecast.staffing.assigned}/${forecast.staffing.preferred}`, compact ? 8 : 10, '#dff5ea', width);
+      this.addHeading(0, 126, 'COLONY POLICIES');
+      const policyLabels = { emergencyFirst: 'EMERGENCIES FIRST', repairBeforeConstruction: 'REPAIR BEFORE BUILD', protectReserves: 'PROTECT RESERVES', autoStaff: 'PREFER TRAINED STAFF' };
+      COLONY_POLICY_KEYS.forEach((key, index) => {
+        const column = index % 2; const row = Math.floor(index / 2); const x = column * width * 0.5; const y = 163 + row * 43;
+        this.addButton(x + width * 0.23, y, width * 0.44, `${policyLabels[key]} ${management.policies[key] ? 'ON' : 'OFF'}`, management.policies[key] ? 0x7af6bd : 0xff735f, () => gameStore.setColonyPolicy(key, !management.policies[key]));
+      });
+      this.addText(0, 245, `PROTECTED RESERVES  ${management.minimumReserves.glow} GLOW / ${management.minimumReserves.alloy} ALLOY\nAutomatic repairs will not spend below this floor.`, compact ? 8 : 10, '#90c9b0', width - 180);
+      this.addButton(width - 74, 260, 145, 'CYCLE RESERVE', 0xbf78ff, () => {
+        const nextGlow = management.minimumReserves.glow >= 60 ? 0 : management.minimumReserves.glow + 12;
+        gameStore.setMinimumReserves(nextGlow, Math.round(nextGlow / 2));
+      });
+      this.addHeading(0, 300, 'WORK PRIORITIES  /  0 OFF · 3 URGENT');
+      MANAGEMENT_PRIORITY_KEYS.forEach((key, index) => {
+        const column = index % 2; const row = Math.floor(index / 2); const x = column * width * 0.5; const y = 335 + row * 43;
+        const value = management.priorities[key];
+        this.addButton(x + width * 0.23, y, width * 0.44, `${MANAGEMENT_LABELS[key]} ${value}`, value === 3 ? 0xff8fcf : value === 0 ? 0x788b82 : 0xf7bd62, () => gameStore.setManagementPriority(key, ((value + 1) % 4) as 0 | 1 | 2 | 3));
+      });
+      return;
+    }
+    if (this.managementTab === 'ROSTER') {
+      const filters: Array<typeof this.rosterFilter> = ['all', 'critical', 'forager', 'caretaker', 'healer', 'builder', 'researcher', 'explorer'];
+      const currentIndex = filters.indexOf(this.rosterFilter);
+      this.addHeading(0, 54, 'POPULATION ROSTER');
+      this.addButton(width - 90, 60, 175, `FILTER ${this.rosterFilter.toUpperCase()}`, 0x65c7ff, () => { this.rosterFilter = filters[(currentIndex + 1) % filters.length]; this.renderPage(); });
+      const living = this.state.creatures.filter((creature) => creature.alive && (this.rosterFilter === 'all' || this.rosterFilter === 'critical'
+        ? this.rosterFilter === 'all' || Math.min(...Object.values(creature.needs)) < 35
+        : creature.assignedRole === this.rosterFilter))
+        .sort((a, b) => Math.min(...Object.values(a.needs)) - Math.min(...Object.values(b.needs)) || b.stress - a.stress);
+      this.addText(0, 88, `${living.length} MATCHING · sorted by risk, then stress. Select a row to open the complete identity card.`, compact ? 8 : 10, '#90c9b0', width);
+      living.slice(0, compact ? 8 : 10).forEach((creature, index) => {
+        const y = 125 + index * (compact ? 49 : 45); const group = management.groups.find((candidate) => candidate.id === creature.managementGroupId);
+        const minimum = Math.round(Math.min(...Object.values(creature.needs)));
+        this.addText(0, y, `${creature.name.toUpperCase()}  ·  ${creature.assignedRole.toUpperCase()}  ·  NEED ${minimum}%  ·  STRESS ${Math.round(creature.stress)}%\n${creature.schedule.toUpperCase()} / ${schedulePhase(this.state.livingWorld.dayTime, creature.schedule).toUpperCase()}  ·  ${group?.name.toUpperCase() ?? 'NO CREW'}  ·  ${creature.task.toUpperCase()}`, compact ? 8 : 9, minimum < 30 ? '#ff9b89' : '#dff5ea', width - 118);
+        this.addButton(width - 52, y + 10, 98, 'OPEN', 0x7af6bd, () => { this.selectedCreatureId = creature.id; this.page = 'LUMA'; this.rebuild(); });
+      });
+      return;
+    }
+    const queue = colonyJobQueue(this.state); const forecast = colonyForecast(this.state);
+    this.addHeading(0, 54, `LIVE JOB QUEUE  ·  ${queue.length} SIGNALS`);
+    if (!queue.length) this.addText(0, 82, 'No blocked or urgent jobs. The colony is operating within current policy.', 11, '#90c9b0', width);
+    queue.slice(0, compact ? 6 : 8).forEach((job, index) => {
+      const y = 84 + index * 39; this.addText(0, y, `${job.status === 'blocked' ? '!' : job.status === 'active' ? '▶' : '◇'}  P${job.priority}  ${job.title}`, compact ? 8 : 10, job.status === 'blocked' ? '#ff9b89' : job.status === 'active' ? '#7af6bd' : '#ffe1a0', width);
+    });
+    const staffingY = 116 + Math.max(1, Math.min(compact ? 6 : 8, queue.length)) * 39;
+    this.addHeading(0, staffingY, `FACILITY STAFFING  ·  ${forecast.staffing.assigned}/${forecast.staffing.preferred} PREFERRED ACTIVE`);
+    this.state.buildings.filter((building) => building.active && !building.constructing).slice(0, compact ? 5 : 7).forEach((building, index) => {
+      const y = staffingY + 27 + index * 43; const definition = BUILDINGS[building.kind];
+      const candidates = this.state.creatures.filter((creature) => creature.alive && !creature.expeditionId)
+        .sort((a, b) => (b.assignedRole === definition.operatorRole ? 30 : 0) + b.skills[definition.operatorSkill] - ((a.assignedRole === definition.operatorRole ? 30 : 0) + a.skills[definition.operatorSkill]));
+      const current = building.preferredOperatorIds[0]; const currentIndex = Math.max(-1, candidates.findIndex((creature) => creature.id === current)); const preferred = candidates.find((creature) => creature.id === current);
+      this.addText(0, y, `${definition.name.toUpperCase()}  ·  BEST ${definition.operatorRole.toUpperCase()}/${definition.operatorSkill.toUpperCase()}\nPREFERRED ${preferred?.name ?? 'AUTOMATIC'}${building.lastOperatorId === preferred?.id ? ' · ON SHIFT' : ''}`, compact ? 8 : 9, '#dff5ea', width - 155);
+      this.addButton(width - 70, y + 10, 135, 'CYCLE STAFF', 0xbf78ff, () => {
+        if (current) gameStore.togglePreferredOperator(building.id, current);
+        const next = candidates[(currentIndex + 1) % (candidates.length + 1)];
+        if (next) gameStore.togglePreferredOperator(building.id, next.id);
+      });
+    });
   }
 
   private renderSocial() {
@@ -267,7 +348,7 @@ export class ColonyScene extends Phaser.Scene {
     const partner = strongest ? this.state.creatures.find((candidate) => candidate.id === strongest[0]) : undefined;
     this.addHeading(0, 0, `${creature.name.toUpperCase()}  ·  GEN ${creature.generation}  ·  ${creature.voiceStyle.toUpperCase()} VOICE`);
     const navY = compact ? 43 : 10;
-    this.addText(0, compact ? 70 : 28, `${ROLE_LABELS[creature.assignedRole]}${creature.autoRole ? ' / SELF-DIRECTED' : ' / ASSIGNED'}  ·  AGE ${Math.floor(creature.age)}\nWHY  ${explainCreatureAction(this.state, creature)}\nTRAITS  ${creature.traits.length ? creature.traits.join(' · ').toUpperCase() : 'STILL EMERGING'}\nFAVORITES  ${creature.favoriteFood.toUpperCase()}  ·  ${creature.preferences.favoriteActivity.toUpperCase()}${partner && strongest ? `\nSTRONGEST BOND  ${partner.name} / ${relationshipStage(strongest[1])} ${Math.floor(strongest[1])}%` : ''}`, compact ? 9 : 11, '#dff5ea', compact ? width : width * 0.48);
+    this.addText(0, compact ? 70 : 28, `${ROLE_LABELS[creature.assignedRole]}${creature.autoRole ? ' / SELF-DIRECTED' : ' / ASSIGNED'}  ·  AGE ${Math.floor(creature.age)}\nWHY  ${creature.lastTaskReason || explainCreatureAction(this.state, creature)}\nTRAITS  ${creature.traits.length ? creature.traits.join(' · ').toUpperCase() : 'STILL EMERGING'}\nFAVORITES  ${creature.favoriteFood.toUpperCase()}  ·  ${creature.preferences.favoriteActivity.toUpperCase()}${partner && strongest ? `\nSTRONGEST BOND  ${partner.name} / ${relationshipStage(strongest[1])} ${Math.floor(strongest[1])}%` : ''}`, compact ? 9 : 11, '#dff5ea', compact ? width : width * 0.48);
     this.addButton(compact ? 36 : width - 282, navY, 64, '◀', 0x65c7ff, () => { this.selectedCreatureId = living[(index - 1 + living.length) % living.length].id; this.renderPage(); });
     this.addButton(compact ? 106 : width - 200, navY, 64, '▶', 0x65c7ff, () => { this.selectedCreatureId = living[(index + 1) % living.length].id; this.renderPage(); });
     this.addButton(compact ? width - 68 : width - 92, navY, compact ? 128 : 126, 'RENAME', 0xff8fcf, () => {
@@ -277,15 +358,20 @@ export class ColonyScene extends Phaser.Scene {
     const roleY = compact ? 180 : 60; const roleX = compact ? 0 : width * 0.53;
     this.addHeading(roleX, roleY, 'ROLE & WORK');
     const roleIndex = ROLES.indexOf(creature.autoRole ? 'auto' : creature.assignedRole);
-    this.addText(roleX, roleY + 27, `Preferred: ${ROLE_LABELS[creature.role]}  ·  Work stress: ${Math.round(creature.stress)}%`, compact ? 9 : 11, creature.stress > 50 ? '#ff9b89' : '#90c9b0');
+    const group = this.state.livingWorld.management.groups.find((candidate) => candidate.id === creature.managementGroupId);
+    this.addText(roleX, roleY + 27, `Preferred: ${ROLE_LABELS[creature.role]}  ·  Stress: ${Math.round(creature.stress)}%\n${creature.schedule.toUpperCase()} SCHEDULE · ${schedulePhase(this.state.livingWorld.dayTime, creature.schedule).toUpperCase()} NOW · ${group?.name.toUpperCase() ?? 'NO CREW'}`, compact ? 8 : 10, creature.stress > 50 ? '#ff9b89' : '#90c9b0');
     this.addButton(compact ? width - 80 : width - 92, roleY + 40, compact ? 150 : 170, `ASSIGN ${ROLES[(roleIndex + 1) % ROLES.length] === 'auto' ? 'AUTONOMY' : ROLE_LABELS[ROLES[(roleIndex + 1) % ROLES.length] as CreatureRole]}`, 0x7af6bd, () => gameStore.assignRole(creature.id, ROLES[(roleIndex + 1) % ROLES.length]));
-    const skillY = compact ? 260 : 178;
+    const scheduleIndex = CREATURE_SCHEDULES.indexOf(creature.schedule);
+    const groupIndex = Math.max(0, this.state.livingWorld.management.groups.findIndex((candidate) => candidate.id === creature.managementGroupId));
+    this.addButton(roleX + (compact ? 75 : 82), roleY + 94, compact ? 145 : 155, `SCHEDULE ${CREATURE_SCHEDULES[(scheduleIndex + 1) % CREATURE_SCHEDULES.length].toUpperCase()}`, 0x65c7ff, () => gameStore.setCreatureSchedule(creature.id, CREATURE_SCHEDULES[(scheduleIndex + 1) % CREATURE_SCHEDULES.length]));
+    this.addButton(roleX + (compact ? 236 : 250), roleY + 94, compact ? 155 : 175, `CREW ${this.state.livingWorld.management.groups[(groupIndex + 1) % this.state.livingWorld.management.groups.length].name.toUpperCase()}`, 0xbf78ff, () => gameStore.setCreatureGroup(creature.id, this.state.livingWorld.management.groups[(groupIndex + 1) % this.state.livingWorld.management.groups.length].id));
+    const skillY = compact ? 315 : 215;
     this.addHeading(0, skillY, 'SKILLS / EXPERIENCE');
     SKILL_KEYS.forEach((key, skillIndex) => {
       const column = skillIndex % 2; const row = Math.floor(skillIndex / 2); const value = creature.skills[key];
       this.addText(column * width * 0.5, skillY + 26 + row * (compact ? 38 : 42), `${SKILL_LABELS[key].padEnd(9)} L${skillLevel(value)}  ${Math.floor(value)}%\n${'■'.repeat(Math.floor(value / 10))}${'·'.repeat(10 - Math.floor(value / 10))}`, compact ? 9 : 11, '#e4f7ed');
     });
-    const historyY = compact ? 408 : 340;
+    const historyY = compact ? 455 : 375;
     this.addHeading(0, historyY, 'LIFE HISTORY & MEMORIES');
     const history = [...creature.history].slice(-4).reverse().map((entry) => `DAY ${Math.floor(entry.at / 240) + 1}  ${entry.title.toUpperCase()} — ${entry.detail}`).join('\n');
     const family = `${creature.parentId ? `PARENT ${this.state.creatures.find((item) => item.id === creature.parentId)?.name ?? 'UNKNOWN'}` : 'FIRST GENERATION'}  ·  ${creature.childrenIds.length} CHILDREN${creature.mentorId ? `  ·  MENTOR ${this.state.creatures.find((item) => item.id === creature.mentorId)?.name ?? 'UNKNOWN'}` : ''}`;
@@ -378,8 +464,8 @@ export class ColonyScene extends Phaser.Scene {
 
   private renderChangelog() {
     const { width } = this.dimensions();
-    this.addHeading(0, 0, 'LIVING MOTION & SOUNDSCAPE  /  2026.07');
-    this.addText(0, 30, 'EXPRESSIVE LUMA\nEvery activity now has its own physical language: smoother stepping and facing, nibbling, splashing, dancing, sleeping breath, tool work, treatment glow, reaching, carrying, repair, celebration, and argument gestures. Mood changes blink rate, energy, bounce, posture, and eye openness.\n\nACTIVE FACILITIES\nEvery facility now has a distinct operating rhythm. Pools ripple, gardens resonate, looms grow, archives breathe, extractors rotate, and clinics pulse. Construction completion and upgrades receive particles, light, camera feedback, and a facility-specific sound signature.\n\nLIVING HABITAT\nWeather now controls foliage sway, rain density, mist, storm darkness, and environmental sound. Water glints, nighttime motes, sunrise and sunset color, footprints, and activity particles make the habitat respond continuously without obscuring the simulation.\n\nADAPTIVE AUDIO\nOriginal procedural music moves between daytime, nighttime, rain, danger, and celebration. Creature voices, environment ambience, and music have separate volume controls.\n\nPERFORMANCE SAFETY\nPresentation budgets scale with quality mode and colony size. Large colonies update distant animation less often, reduce particles and relationship redraws, and disable costly facility effects in low-power mode while simulation behavior remains unchanged.', 12, '#e4f7ed', width);
+    this.addHeading(0, 0, 'ADVANCED COLONY MANAGEMENT  /  2026.07');
+    this.addText(0, 30, 'POLICIES & PRIORITIES\nA new MANAGE workspace controls medical care, food, cleanliness, rest, morale, repairs, construction, and industry. Emergency care can override routine work, repairs can take precedence over expansion, and protected resource reserves prevent automation from spending the colony into danger.\n\nSCHEDULES & SAFE SHIFTS\nEvery Luma now follows a Balanced, Early, Late, or Flexible schedule with visible work, free-time, and rest phases. Protected recovery blocks and a maximum continuous shift prevent silent overwork. The Luma identity card explains the exact policy, need, or schedule behind its current action.\n\nCREWS & ZONES\nThree persistent crews organize idle movement around North Grove, Central Field, and South Meadow. Zones create a readable colony rhythm while urgent needs and required jobs remain free to cross boundaries.\n\nFORECASTS & JOB QUEUE\nFood, bed, and clinic forecasts expose capacity pressure early. A live job queue combines critical care, construction, repairs, and facility congestion, including plain-language reasons when work is delayed or blocked.\n\nPREFERRED STAFFING\nEvery facility can prefer a named operator. Preferred staff receive first claim when available, while automatic staffing remains the safe fallback. Assignments, schedules, crews, priorities, policies, and reserves all persist through old-save migration and offline simulation.\n\nPERFORMANCE SAFETY\nManagement decisions stay in the worker simulation and reuse existing capacity, navigation, and reservation systems. Automated tests cover migration, reserve protection, schedules, emergency overrides, preferred staffing, zone behavior, and large-colony compatibility.', 12, '#e4f7ed', width);
   }
 
   private shutdown() { this.unsubscribe?.(); this.unsubscribe = undefined; this.scale.off('resize', this.rebuild, this); this.input.keyboard?.removeAllListeners(); }

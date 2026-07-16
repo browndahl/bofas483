@@ -18,6 +18,14 @@ import { resolveObjectiveProgress } from './progression';
 import { SpatialGrid } from './spatialGrid';
 import type { BuildingKind, BuildingState, CreatureState, TaskType, Vec2, WorldState } from './worldState';
 import { appendWorldEvent } from './worldState';
+import {
+  canSpendReserve,
+  creatureZone,
+  ensureColonyManagement,
+  managedTask,
+  operatorPreferenceScore,
+  priorityForTask
+} from './colonyManagement';
 
 const WORLD_WIDTH = 1600;
 const WORLD_HEIGHT = 1000;
@@ -29,13 +37,14 @@ interface SocialPlan { partnerId: string; task: 'socialize' | 'comfort' | 'argue
 interface ServiceAssignment { building: BuildingState; queueIndex: number; target: Vec2; serving: boolean }
 const socialTask = (task: TaskType): SocialPlan['task'] => task === 'comfort' || task === 'argue' ? task : 'socialize';
 
-function taskUrgency(creature: CreatureState, task: TaskType) {
-  if (task === 'heal') return 220 - creature.needs.health;
-  if (task === 'eat') return 180 - creature.needs.hunger;
-  if (task === 'bathe') return 150 - creature.needs.hygiene;
-  if (task === 'sleep') return 140 - creature.needs.energy;
-  if (task === 'play') return 120 - creature.needs.happiness;
-  return 20 + creature.personality.diligence * 10;
+function taskUrgency(world: WorldState, creature: CreatureState, task: TaskType) {
+  const policyWeight = priorityForTask(world, task) * 34;
+  if (task === 'heal') return 220 - creature.needs.health + policyWeight;
+  if (task === 'eat') return 180 - creature.needs.hunger + policyWeight;
+  if (task === 'bathe') return 150 - creature.needs.hygiene + policyWeight;
+  if (task === 'sleep') return 140 - creature.needs.energy + policyWeight;
+  if (task === 'play') return 120 - creature.needs.happiness + policyWeight;
+  return 20 + creature.personality.diligence * 10 + policyWeight;
 }
 
 function openStation(building: BuildingState, queueIndex: number, buildings: BuildingState[]) {
@@ -45,11 +54,11 @@ function openStation(building: BuildingState, queueIndex: number, buildings: Bui
   return candidates.find((candidate) => !isNavigationBlocked(candidate, buildings, building.id)) ?? requested;
 }
 
-function buildServiceAssignments(creatures: CreatureState[], tasks: Map<string, TaskType>, buildingsByKind: Map<BuildingKind, BuildingState[]>, buildings: BuildingState[]) {
+function buildServiceAssignments(world: WorldState, creatures: CreatureState[], tasks: Map<string, TaskType>, buildingsByKind: Map<BuildingKind, BuildingState[]>, buildings: BuildingState[]) {
   const assignments = new Map<string, ServiceAssignment>();
   const loads = new Map<string, number>();
   const waiting = creatures.filter((creature) => creature.alive && !creature.expeditionId && taskBuilding[tasks.get(creature.id) ?? 'wander'])
-    .sort((a, b) => taskUrgency(b, tasks.get(b.id) ?? 'wander') - taskUrgency(a, tasks.get(a.id) ?? 'wander') || a.id.localeCompare(b.id));
+    .sort((a, b) => taskUrgency(world, b, tasks.get(b.id) ?? 'wander') - taskUrgency(world, a, tasks.get(a.id) ?? 'wander') || a.id.localeCompare(b.id));
   for (const creature of waiting) {
     const kind = taskBuilding[tasks.get(creature.id) ?? 'wander'];
     const candidates = kind ? buildingsByKind.get(kind) ?? [] : [];
@@ -59,7 +68,8 @@ function buildServiceAssignments(creatures: CreatureState[], tasks: Map<string, 
       const distance = Math.hypot(building.x - creature.x, building.y - creature.y);
       const queuePressure = load / buildingCapacity(building) * 230;
       const preferenceBonus = creature.preferences.favoriteBuilding === building.kind ? 42 : 0;
-      const score = distance + queuePressure - preferenceBonus;
+      const staffingBonus = world.livingWorld.management.policies.autoStaff ? operatorPreferenceScore(building, creature) : 0;
+      const score = distance + queuePressure - preferenceBonus - staffingBonus;
       if (score < bestScore) { bestScore = score; chosen = building; }
     }
     if (!chosen) continue;
@@ -70,10 +80,13 @@ function buildServiceAssignments(creatures: CreatureState[], tasks: Map<string, 
   return assignments;
 }
 
-function buildProjectAssignments(creatures: CreatureState[], tasks: Map<string, TaskType>, buildings: BuildingState[]) {
+function buildProjectAssignments(world: WorldState, creatures: CreatureState[], tasks: Map<string, TaskType>, buildings: BuildingState[]) {
   const assignments = new Map<string, ServiceAssignment>(); const loads = new Map<string, number>();
   const workers = creatures.filter((creature) => creature.alive && !creature.expeditionId && ['construct', 'maintain'].includes(tasks.get(creature.id) ?? ''))
-    .sort((a, b) => b.personality.diligence - a.personality.diligence);
+    .sort((a, b) => {
+      const aPriority = priorityForTask(world, tasks.get(a.id) ?? 'wander'); const bPriority = priorityForTask(world, tasks.get(b.id) ?? 'wander');
+      return bPriority - aPriority || b.personality.diligence - a.personality.diligence;
+    });
   for (const creature of workers) {
     const task = tasks.get(creature.id); const candidates = task === 'construct'
       ? buildings.filter((building) => building.constructing)
@@ -346,7 +359,7 @@ function pollutionAt(world: WorldState, x: number, y: number): number {
 
 export function tickWorld(world: WorldState, seconds: number): WorldState {
   const next = structuredClone(world);
-  ensureLivingWorld(next); next.creatures.forEach(ensureCreatureHistory); next.buildings.forEach(ensureBuildingLife);
+  ensureLivingWorld(next); ensureColonyManagement(next); next.creatures.forEach(ensureCreatureHistory); next.buildings.forEach(ensureBuildingLife);
   next.time += seconds;
   const natureProtection = researchBonus(next, 'nature');
   const sources = next.buildings.filter((building) => building.active && !building.constructing)
@@ -358,9 +371,11 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
       building.durability = Math.max(0, building.durability - seconds * (building.kind === 'extractor' ? 0.009 : 0.0035));
       if (building.durability <= 0) building.active = false;
     }
-    if (!building.constructing && building.maintenanceMode === 'auto' && building.durability < 55 && !building.maintenanceFunded) {
+    const management = next.livingWorld.management;
+    const autoRepairThreshold = Math.max(management.autoFundRepairsBelow, building.maintenanceMode === 'auto' ? 55 : 0);
+    if (!building.constructing && building.maintenanceMode === 'auto' && building.durability < autoRepairThreshold && !building.maintenanceFunded) {
       const cost = maintenanceCost(building);
-      if (next.resources.glow >= cost.glow && next.resources.alloy >= cost.alloy) {
+      if (next.resources.glow >= cost.glow && next.resources.alloy >= cost.alloy && canSpendReserve(next, cost)) {
         next.resources.glow -= cost.glow; next.resources.alloy -= cost.alloy; building.maintenanceFunded = true;
         appendWorldEvent(next, { type: 'maintenance_funded', at: next.time, payload: { buildingId: building.id, automatic: true, glow: cost.glow, alloy: cost.alloy } });
       }
@@ -391,12 +406,16 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
   const socialPlans = buildSocialPlans(next);
   const groupActivity = next.livingWorld.groupActivity;
   const groupMembers = new Set(groupActivity?.creatureIds ?? []);
+  const taskReasons = new Map<string, string>();
   const taskPlans = new Map(next.creatures.filter((creature) => creature.alive && !creature.expeditionId).map((creature) => {
     const urgent = Math.min(creature.needs.health, creature.needs.hunger, creature.needs.hygiene, creature.needs.energy) < 34;
-    return [creature.id, groupMembers.has(creature.id) && !urgent ? 'celebrate' : socialPlans.get(creature.id)?.task ?? chooseTask(creature, next.buildings)] as const;
+    if (groupMembers.has(creature.id) && !urgent) { taskReasons.set(creature.id, 'Colony-wide group activity'); return [creature.id, 'celebrate'] as const; }
+    if (socialPlans.has(creature.id)) { taskReasons.set(creature.id, 'Relationship need and available companion'); return [creature.id, socialPlans.get(creature.id)!.task] as const; }
+    const decision = managedTask(next, creature, chooseTask(creature, next.buildings)); taskReasons.set(creature.id, decision.reason);
+    return [creature.id, decision.task] as const;
   }));
-  const serviceAssignments = buildServiceAssignments(next.creatures, taskPlans, buildingsByKind, next.buildings);
-  buildProjectAssignments(next.creatures, taskPlans, next.buildings).forEach((assignment, id) => serviceAssignments.set(id, assignment));
+  const serviceAssignments = buildServiceAssignments(next, next.creatures, taskPlans, buildingsByKind, next.buildings);
+  buildProjectAssignments(next, next.creatures, taskPlans, next.buildings).forEach((assignment, id) => serviceAssignments.set(id, assignment));
   const socialGrid = new SpatialGrid<CreatureState>(128); socialGrid.rebuild(next.creatures.filter((creature) => creature.alive && !creature.expeditionId));
   const newborns: CreatureState[] = [];
   next.creatures = next.creatures.map((creature) => {
@@ -404,6 +423,8 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
     const socialPlan = socialPlans.get(creature.id);
     const task = taskPlans.get(creature.id) ?? chooseTask(creature, next.buildings);
     creature.task = task;
+    creature.lastTaskReason = taskReasons.get(creature.id) ?? 'Responding to current colony conditions';
+    creature.shiftWork = ['work', 'construct', 'maintain'].includes(task) ? creature.shiftWork + seconds : Math.max(0, creature.shiftWork - seconds * 0.5);
     const service = serviceAssignments.get(creature.id);
     const building = service?.building;
     creature.queueIndex = service?.queueIndex ?? 0;
@@ -431,8 +452,9 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
       if (Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y) < 14 || creature.navigationPath.length === 0) {
         const serial = Number(creature.id.replace(/\D/g, '')) || 1;
         const theta = ((next.seed + creature.age * 19 + serial * 41) % 628) / 100;
-        const radius = 120 + creature.personality.curiosity * 105;
-        creature.target = { x: Math.max(80, Math.min(1520, creature.x + Math.cos(theta) * radius)), y: Math.max(100, Math.min(900, creature.y + Math.sin(theta) * radius * 0.76)) };
+        const zone = creatureZone(next, creature); const radius = zone ? zone.radius * (0.35 + creature.personality.curiosity * 0.5) : 120 + creature.personality.curiosity * 105;
+        const origin = zone ?? creature;
+        creature.target = { x: Math.max(80, Math.min(1520, origin.x + Math.cos(theta) * radius)), y: Math.max(100, Math.min(900, origin.y + Math.sin(theta) * radius * 0.76)) };
         creature.navigationPath = []; creature.navigationTarget = undefined;
       }
     }

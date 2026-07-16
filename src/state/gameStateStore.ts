@@ -14,7 +14,22 @@ import { expeditionResearchCost, launchExpedition, resolveExpeditionDecision } f
 import { resolvePersonalRequest, resolveStoryChoice } from '../simulation/colonyStories';
 import { addJournal, RESEARCH_BRANCHES } from '../simulation/livingWorld';
 import { recoverSilentColony } from '../simulation/recovery';
-import type { BuildingKind, CreatureRole, CreatureState, ExpeditionChoice, GameSettings, NeedKey, PersonalRequestChoice, RegionId, ResearchBranch, StoryChoice, WorldState } from '../simulation/worldState';
+import type {
+  BuildingKind,
+  ColonyPolicyKey,
+  CreatureRole,
+  CreatureSchedule,
+  CreatureState,
+  ExpeditionChoice,
+  GameSettings,
+  ManagementPriorityKey,
+  NeedKey,
+  PersonalRequestChoice,
+  RegionId,
+  ResearchBranch,
+  StoryChoice,
+  WorldState
+} from '../simulation/worldState';
 import { appendWorldEvent, createInitialWorld } from '../simulation/worldState';
 
 type Listener = (state: WorldState) => void;
@@ -129,6 +144,36 @@ class GameStateStore {
     creature.autoRole = role === 'auto'; creature.assignedRole = role === 'auto' ? creature.role : role;
     creature.history.push({ at: next.time, title: role === 'auto' ? 'Autonomy restored' : `Assigned ${role}`, detail: role === 'auto' ? 'Allowed to choose work from personality again.' : 'The operator selected a colony role.' });
     appendWorldEvent(next, { type: 'role_assignment', at: next.time, payload: { creatureId: id, role } }); this.set(next); return true;
+  }
+  setCreatureSchedule(id: string, schedule: CreatureSchedule) {
+    const next = structuredClone(this.state); const creature = next.creatures.find((candidate) => candidate.id === id && candidate.alive); if (!creature) return false;
+    creature.schedule = schedule; creature.history.push({ at: next.time, title: `${schedule} schedule`, detail: 'The colony adjusted this Luma’s protected work, free-time, and rest blocks.' });
+    appendWorldEvent(next, { type: 'schedule_assignment', at: next.time, payload: { creatureId: id, schedule } }); this.set(next); return true;
+  }
+  setCreatureGroup(id: string, groupId: string) {
+    const next = structuredClone(this.state); const creature = next.creatures.find((candidate) => candidate.id === id && candidate.alive);
+    const group = next.livingWorld.management.groups.find((candidate) => candidate.id === groupId); if (!creature || !group) return false;
+    creature.managementGroupId = groupId; creature.history.push({ at: next.time, title: `Joined ${group.name}`, detail: 'Free movement now favors the group’s assigned habitat zone.' });
+    appendWorldEvent(next, { type: 'management_group', at: next.time, payload: { creatureId: id, groupId } }); this.set(next); return true;
+  }
+  setManagementPriority(key: ManagementPriorityKey, priority: 0 | 1 | 2 | 3) {
+    const next = structuredClone(this.state); next.livingWorld.management.priorities[key] = priority;
+    appendWorldEvent(next, { type: 'management_priority', at: next.time, payload: { key, priority } }); this.set(next); return true;
+  }
+  setColonyPolicy(key: ColonyPolicyKey, enabled: boolean) {
+    const next = structuredClone(this.state); next.livingWorld.management.policies[key] = enabled;
+    appendWorldEvent(next, { type: 'colony_policy', at: next.time, payload: { key, enabled } }); this.set(next); return true;
+  }
+  setMinimumReserves(glow: number, alloy: number) {
+    const next = structuredClone(this.state); next.livingWorld.management.minimumReserves = { glow: Math.max(0, glow), alloy: Math.max(0, alloy) };
+    appendWorldEvent(next, { type: 'reserve_policy', at: next.time, payload: { glow, alloy } }); this.set(next); return true;
+  }
+  togglePreferredOperator(buildingId: string, creatureId: string) {
+    const next = structuredClone(this.state); const building = next.buildings.find((candidate) => candidate.id === buildingId);
+    const creature = next.creatures.find((candidate) => candidate.id === creatureId && candidate.alive); if (!building || !creature) return false;
+    if (building.preferredOperatorIds.includes(creatureId)) building.preferredOperatorIds = building.preferredOperatorIds.filter((id) => id !== creatureId);
+    else building.preferredOperatorIds = [...building.preferredOperatorIds, creatureId].slice(-4);
+    appendWorldEvent(next, { type: 'preferred_operator', at: next.time, payload: { buildingId, creatureId, enabled: building.preferredOperatorIds.includes(creatureId) } }); this.set(next); return true;
   }
   renameCreature(id: string, name: string) {
     const clean = name.trim().slice(0, 24); if (!clean) return false;
