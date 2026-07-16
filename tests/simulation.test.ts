@@ -11,7 +11,7 @@ import {
   materialDeliveryRatio,
   validateBuildingPlacement
 } from '../src/simulation/building';
-import { buildNavigationPath, isNavigationBlocked } from '../src/simulation/navigation';
+import { buildNavigationPath, buildRecoveryPath, isNavigationBlocked } from '../src/simulation/navigation';
 import { createCreaturePersonality, setBond } from '../src/simulation/personality';
 import { ROLE_SKILL, SKILL_KEYS, trainSkill } from '../src/simulation/colonyLife';
 import { advanceOfflineWorld } from '../src/simulation/offlineProgress';
@@ -202,6 +202,60 @@ describe('environment and navigation', () => {
     const next = tickWorld(world, 0.2); const targets = next.creatures.map((creature) => creature.socialTarget);
     expect(targets.every(Boolean)).toBe(true);
     expect(targets.every((target) => target && !isNavigationBlocked(target, next.buildings))).toBe(true);
+  });
+  it('reserves separate meeting areas for simultaneous social pairs', () => {
+    const world = createInitialWorld(17);
+    world.creatures = Array.from({ length: 4 }, (_, index) => makeCreature(`c${index + 1}`, 760 + index % 2 * 8, 520 + Math.floor(index / 2) * 8));
+    world.creatures.forEach((creature) => {
+      creature.age = 10;
+      creature.socialCooldown = 0;
+      creature.needs.happiness = 65;
+      creature.personality.sociability = 1;
+    });
+    const next = tickWorld(world, 0.2);
+    const paired = next.creatures.filter((creature) => creature.socialTarget && creature.destinationCreatureId);
+    expect(paired).toHaveLength(4);
+    for (const creature of paired) {
+      const partner = paired.find((candidate) => candidate.id === creature.destinationCreatureId)!;
+      for (const unrelated of paired.filter((candidate) => candidate.id !== creature.id && candidate.id !== partner.id)) {
+        expect(Math.hypot(creature.socialTarget!.x - unrelated.socialTarget!.x, creature.socialTarget!.y - unrelated.socialTarget!.y)).toBeGreaterThanOrEqual(86);
+      }
+    }
+  });
+  it('separates creatures that begin at exactly the same position', () => {
+    const world = createInitialWorld(18);
+    world.creatures = [makeCreature('c1', 800, 600), makeCreature('c2', 800, 600)];
+    world.creatures.forEach((creature) => {
+      creature.socialCooldown = 60;
+      creature.directOrder = { kind: 'move', issuedAt: 0, expiresAt: 60, target: { x: 800, y: 600 } };
+    });
+    const next = tickWorld(world, 0.2);
+    expect(Math.hypot(next.creatures[0].x - next.creatures[1].x, next.creatures[0].y - next.creatures[1].y)).toBeGreaterThan(5);
+  });
+  it('builds a detour through open personal space after a crowded route stalls', () => {
+    const path = buildRecoveryPath(
+      { x: 800, y: 600 },
+      { x: 1100, y: 600 },
+      [],
+      [{ x: 858, y: 600 }, { x: 850, y: 630 }, { x: 850, y: 570 }],
+      7
+    );
+    expect(path.length).toBeGreaterThan(1);
+    expect(path.some((point) => Math.abs(point.y - 600) > 35)).toBe(true);
+  });
+  it('recovers a densely packed colony without permanent crowd locks', () => {
+    let world = createInitialWorld(19);
+    world.creatures = Array.from({ length: 24 }, (_, index) => makeCreature(`c${index + 1}`, 760 + index % 6 * 5, 500 + Math.floor(index / 6) * 5));
+    world.creatures.forEach((creature) => {
+      creature.age = 10;
+      creature.socialCooldown = 0;
+      creature.needs = { hunger: 72, hygiene: 72, happiness: 54, health: 100, energy: 72 };
+    });
+    for (let index = 0; index < 150; index++) world = tickWorld(world, 0.2);
+    const living = world.creatures.filter((creature) => creature.alive);
+    const occupiedCells = new Set(living.map((creature) => `${Math.round(creature.x / 8)},${Math.round(creature.y / 8)}`));
+    expect(Math.max(...living.map((creature) => creature.stuckTimer))).toBeLessThan(2.2);
+    expect(occupiedCells.size).toBeGreaterThan(living.length * 0.8);
   });
   it('reserves distinct service stations and queues overflow visitors', () => {
     const world = createInitialWorld(1); const loom = createBuilding('nutrient-bed', 700, 500, 1); world.buildings.push(loom);

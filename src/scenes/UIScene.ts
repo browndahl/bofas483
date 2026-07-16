@@ -92,6 +92,11 @@ export class UIScene extends Phaser.Scene {
     this.scale.on('resize', this.layout, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
     this.layout();
+    const authNotice = this.game.registry.get('auth-redirect-notice') as string | undefined;
+    if (authNotice) {
+      this.game.registry.remove('auth-redirect-notice');
+      this.time.delayedCall(160, () => this.scene.launch('AuthScene', { notice: authNotice }));
+    }
   }
   private createHud() {
     this.topPanel = panel(this, 0, 0, 100, 58).setOrigin(0, 0).setDepth(100);

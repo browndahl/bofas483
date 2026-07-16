@@ -4,6 +4,8 @@ import { findPath, type GridPoint } from './pathfinding';
 export const NAV_CELL_SIZE = 50;
 const GRID_WIDTH = 32;
 const GRID_HEIGHT = 20;
+const SOCIAL_MEETING_CLEARANCE = 86;
+const CREATURE_ESCAPE_CLEARANCE = 50;
 
 interface CircleObstacle { x: number; y: number; radius: number }
 export interface SocialMeeting { first: Vec2; second: Vec2 }
@@ -95,7 +97,12 @@ export function buildNavigationPath(start: Vec2, target: Vec2, buildings: Buildi
   return points;
 }
 
-export function findSocialMeeting(firstCreature: Vec2, secondCreature: Vec2, buildings: BuildingState[]): SocialMeeting | undefined {
+export function findSocialMeeting(
+  firstCreature: Vec2,
+  secondCreature: Vec2,
+  buildings: BuildingState[],
+  unavailableTargets: Vec2[] = []
+): SocialMeeting | undefined {
   const midpoint = { x: (firstCreature.x + secondCreature.x) / 2, y: (firstCreature.y + secondCreature.y) / 2 };
   const pairDx = secondCreature.x - firstCreature.x; const pairDy = secondCreature.y - firstCreature.y;
   const pairLength = Math.hypot(pairDx, pairDy);
@@ -111,11 +118,38 @@ export function findSocialMeeting(firstCreature: Vec2, secondCreature: Vec2, bui
     const first = { x: center.x + perpendicular.x * 30, y: center.y + perpendicular.y * 30 };
     const second = { x: center.x - perpendicular.x * 30, y: center.y - perpendicular.y * 30 };
     if (isNavigationBlocked(first, buildings) || isNavigationBlocked(second, buildings)) continue;
+    if ([first, second].some((target) => unavailableTargets.some((reserved) => Math.hypot(target.x - reserved.x, target.y - reserved.y) < SOCIAL_MEETING_CLEARANCE))) continue;
     const firstReachable = Math.hypot(first.x - firstCreature.x, first.y - firstCreature.y) < 12 || buildNavigationPath(firstCreature, first, buildings).length > 0;
     const secondReachable = Math.hypot(second.x - secondCreature.x, second.y - secondCreature.y) < 12 || buildNavigationPath(secondCreature, second, buildings).length > 0;
     if (firstReachable && secondReachable) return { first, second };
   }
   return undefined;
+}
+
+export function buildRecoveryPath(
+  start: Vec2,
+  target: Vec2,
+  buildings: BuildingState[],
+  occupied: Vec2[],
+  seed: number,
+  destinationBuildingId?: string
+): Vec2[] {
+  const basePath = buildNavigationPath(start, target, buildings, destinationBuildingId);
+  const phase = ((seed * 2.399963229728653) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+  for (const radius of [58, 86, 118]) {
+    for (let index = 0; index < 12; index++) {
+      const angle = phase + index / 12 * Math.PI * 2;
+      const escape = { x: start.x + Math.cos(angle) * radius, y: start.y + Math.sin(angle) * radius };
+      if (isNavigationBlocked(escape, buildings)) continue;
+      if (occupied.some((point) => Math.hypot(escape.x - point.x, escape.y - point.y) < CREATURE_ESCAPE_CLEARANCE)) continue;
+      const escapePath = buildNavigationPath(start, escape, buildings);
+      if (!escapePath.length) continue;
+      const destinationPath = buildNavigationPath(escape, target, buildings, destinationBuildingId);
+      if (!destinationPath.length && Math.hypot(escape.x - target.x, escape.y - target.y) > 14) continue;
+      return [...escapePath, ...destinationPath];
+    }
+  }
+  return basePath;
 }
 
 export function isNavigationBlocked(point: Vec2, buildings: BuildingState[], destinationBuildingId?: string): boolean {

@@ -9,10 +9,33 @@ max_rows = 1000
 
 [auth]
 enabled = true
-site_url = "http://localhost:4830"
-additional_redirect_urls = ["http://localhost:4830", "https://*.vercel.app"]
+site_url = "https://bofas483-project.vercel.app"
+additional_redirect_urls = [
+  "https://bofas483-project.vercel.app/**",
+  "https://bofas483-project-browndah1.vercel.app/**",
+  "https://bofas483-project-*-browndah1.vercel.app/**",
+  "http://localhost:4830/**",
+  "http://localhost:4831/**",
+  "http://localhost:4832/**"
+]
 enable_signup = true
 enable_anonymous_sign_ins = true
+enable_manual_linking = true
+minimum_password_length = 8
+
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+double_confirm_changes = true
+max_frequency = "1m"
+otp_length = 8
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[storage.vector]
+enabled = false
 
 [functions.save-game]
 verify_jwt = true
