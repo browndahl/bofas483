@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { dioramaDepth, dioramaScaleAtY, dioramaShadowAlpha, dioramaShadowOffset } from '../src/rendering/diorama';
 import { scrollMetrics } from '../src/ui/layout';
 import { fittedButtonFontSize, truncateText } from '../src/ui/typography';
 
@@ -27,5 +28,25 @@ describe('UI containment helpers', () => {
     expect(fittedButtonFontSize('START', 42)).toBeGreaterThanOrEqual(8);
     expect(fittedButtonFontSize('START', 42)).toBeLessThan(13);
     expect(fittedButtonFontSize('AUTO MAINTENANCE', 166)).toBe(13);
+  });
+});
+
+describe('2.5D diorama presentation', () => {
+  it('sorts lower world positions in front of higher positions', () => {
+    expect(dioramaDepth(800)).toBeGreaterThan(dioramaDepth(300));
+    expect(dioramaDepth(500, 0.5)).toBeGreaterThan(dioramaDepth(500));
+  });
+
+  it('casts directional shadows that change across the day', () => {
+    const morning = dioramaShadowOffset(0.2, 60);
+    const evening = dioramaShadowOffset(0.8, 60);
+    expect(morning.x).toBeLessThan(0);
+    expect(evening.x).toBeGreaterThan(0);
+    expect(morning.y).toBeGreaterThan(0);
+  });
+
+  it('keeps foreground actors subtly larger and storms softly lit', () => {
+    expect(dioramaScaleAtY(900)).toBeGreaterThan(dioramaScaleAtY(100));
+    expect(dioramaShadowAlpha(0.5, 'storm')).toBeLessThan(dioramaShadowAlpha(0.5, 'clear'));
   });
 });
