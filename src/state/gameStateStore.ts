@@ -1,7 +1,8 @@
-import { BUILDINGS, canAfford, canAffordUpgrade, createBuilding, upgradeCost, validateBuildingPlacement } from '../simulation/building';
+import { advancedUpgradeCost, BUILDINGS, canAfford, canAffordAdvancedUpgrade, canAffordUpgrade, createBuilding, upgradeCost, validateBuildingPlacement } from '../simulation/building';
+import { expeditionResearchCost, launchExpedition, resolveExpeditionDecision } from '../simulation/expeditions';
 import { addJournal, RESEARCH_BRANCHES } from '../simulation/livingWorld';
 import { recoverSilentColony } from '../simulation/recovery';
-import type { BuildingKind, CreatureRole, CreatureState, GameSettings, NeedKey, ResearchBranch, WorldState } from '../simulation/worldState';
+import type { BuildingKind, CreatureRole, CreatureState, ExpeditionChoice, GameSettings, NeedKey, RegionId, ResearchBranch, WorldState } from '../simulation/worldState';
 import { appendWorldEvent, createInitialWorld } from '../simulation/worldState';
 
 type Listener = (state: WorldState) => void;
@@ -36,7 +37,7 @@ class GameStateStore {
   care(id: string, need: Extract<NeedKey, 'hunger' | 'hygiene' | 'happiness'>) {
     const next = structuredClone(this.state);
     const creature = next.creatures.find((c) => c.id === id && c.alive);
-    if (!creature || next.resources.glow < 2) return false;
+    if (!creature || creature.expeditionId || next.resources.glow < 2) return false;
     const amount = next.technologies.includes('gentle-hands') ? 34 : 24;
     creature.needs[need] = Math.min(100, creature.needs[need] + amount);
     if (need === 'hunger') creature.needs.energy = Math.min(100, creature.needs.energy + 5);
@@ -71,6 +72,19 @@ class GameStateStore {
     addJournal(next, { category: 'milestone', title: `${branch === 'quality' ? 'Quality' : 'Capacity'} upgrade begun`, detail: `${BUILDINGS[building.kind].name} awaits skilled construction.` });
     this.set(next); return true;
   }
+  advanceBuilding(id: string) {
+    const next = structuredClone(this.state);
+    const building = next.buildings.find((candidate) => candidate.id === id);
+    if (!building || !canAffordAdvancedUpgrade(next.resources, next.livingWorld, building)) return false;
+    const cost = advancedUpgradeCost(building);
+    next.resources.glow -= cost.glow; next.resources.alloy -= cost.alloy;
+    next.livingWorld.rareResources.memoryCrystal -= cost.memoryCrystal; next.livingWorld.rareResources.wildSeed -= cost.wildSeed;
+    building.level = 3; building.constructionProgress = 60; building.constructing = true; building.active = false;
+    next.profile.ambition += 1.5; next.livingWorld.reputation += 5;
+    appendWorldEvent(next, { type: 'advanced_upgrade', at: next.time, payload: { id: building.id, kind: building.kind, level: 3 } });
+    addJournal(next, { category: 'milestone', title: `Ascendant ${BUILDINGS[building.kind].name} begun`, detail: 'Rare matter is reshaping this facility into its final form.' });
+    this.set(next); return true;
+  }
   assignRole(id: string, role: CreatureRole | 'auto') {
     const next = structuredClone(this.state); const creature = next.creatures.find((candidate) => candidate.id === id && candidate.alive); if (!creature) return false;
     creature.autoRole = role === 'auto'; creature.assignedRole = role === 'auto' ? creature.role : role;
@@ -84,11 +98,24 @@ class GameStateStore {
     appendWorldEvent(next, { type: 'creature_renamed', at: next.time, payload: { creatureId: id, previous, name: clean } }); this.set(next); return true;
   }
   unlockResearch(branch: ResearchBranch) {
-    const next = structuredClone(this.state); const level = next.livingWorld.research[branch]; const cost = 20 + level * 15;
-    if (level >= 5 || next.livingWorld.researchPoints < cost) return false;
-    next.livingWorld.researchPoints -= cost; next.livingWorld.research[branch]++;
+    const next = structuredClone(this.state); const level = next.livingWorld.research[branch]; const cost = expeditionResearchCost(next, branch);
+    if (level >= 5 || next.livingWorld.researchPoints < cost.rp) return false;
+    if (cost.rare && next.livingWorld.rareResources[cost.rare] < cost.rareAmount) return false;
+    next.livingWorld.researchPoints -= cost.rp;
+    if (cost.rare) next.livingWorld.rareResources[cost.rare] -= cost.rareAmount;
+    next.livingWorld.research[branch]++;
     addJournal(next, { category: 'discovery', title: `${RESEARCH_BRANCHES[branch].name} research level ${level + 1}`, detail: RESEARCH_BRANCHES[branch].bonus });
     appendWorldEvent(next, { type: 'research_unlock', at: next.time, payload: { branch, level: level + 1 } }); this.set(next); return true;
+  }
+  startExpedition(regionId: RegionId, creatureIds: string[]) {
+    const next = structuredClone(this.state); const result = launchExpedition(next, regionId, creatureIds);
+    if (result.ok) this.set(next);
+    return result;
+  }
+  resolveExpedition(id: string, choice: ExpeditionChoice) {
+    const next = structuredClone(this.state);
+    if (!resolveExpeditionDecision(next, id, choice)) return false;
+    this.set(next); return true;
   }
   updateSetting<K extends keyof GameSettings>(key: K, value: GameSettings[K]) {
     const next = structuredClone(this.state); next.livingWorld.settings[key] = value; this.set(next); return true;

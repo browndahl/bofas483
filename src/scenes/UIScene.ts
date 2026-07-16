@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BUILDINGS, buildingCapacity, buildingDisplayName, canAffordUpgrade, upgradeCost, upgradeDescription } from '../simulation/building';
+import { advancedUpgradeCost, advancedUpgradeDescription, BUILDINGS, buildingCapacity, buildingDisplayName, canAffordAdvancedUpgrade, canAffordUpgrade, upgradeCost, upgradeDescription } from '../simulation/building';
 import { ACTIVITY_LABELS, ROLE_LABELS, SKILL_KEYS, SKILL_LABELS, skillLevel } from '../simulation/colonyLife';
 import { personalityLabels } from '../simulation/personality';
 import { relationshipStage } from '../simulation/livingWorld';
@@ -81,19 +81,19 @@ export class UIScene extends Phaser.Scene {
 
     this.creaturePanel = this.add.container(0, 0).setDepth(110);
     this.creaturePanel.add(panel(this, 0, 0, 330, 420));
-    this.creatureName = crisp(this.add.text(-145, -190, 'PIP-01', { fontFamily: DISPLAY_FONT, fontSize: '16px', color: '#fff0a8', letterSpacing: 0.7 }));
+    this.creatureName = crisp(this.add.text(-145, -190, 'PIP-01', { fontFamily: DISPLAY_FONT, fontStyle: 'bold', fontSize: '18px', color: '#fff0a8', letterSpacing: 0.35 }));
     this.creatureStatus = crisp(this.add.text(145, -188, 'ALIVE', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#d8c69a' })).setOrigin(1, 0);
-    this.creatureRole = crisp(this.add.text(-145, -167, '', { fontFamily: DISPLAY_FONT, fontSize: '11px', color: '#7af6bd', letterSpacing: 0.7 }));
-    this.creaturePersonality = crisp(this.add.text(-145, -149, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#90c9b0', wordWrap: { width: 290 }, lineSpacing: 2 }));
-    this.creaturePreference = crisp(this.add.text(-145, -120, '', { fontFamily: UI_FONT, fontSize: '9px', color: '#d8c69a' }));
-    this.creatureAmbition = crisp(this.add.text(-145, -104, '', { fontFamily: UI_FONT, fontSize: '9px', color: '#f7bd62', wordWrap: { width: 290 } }));
+    this.creatureRole = crisp(this.add.text(-145, -167, '', { fontFamily: DISPLAY_FONT, fontStyle: 'bold', fontSize: '12px', color: '#7af6bd', letterSpacing: 0.3 }));
+    this.creaturePersonality = crisp(this.add.text(-145, -149, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#b7e2ce', wordWrap: { width: 290 }, lineSpacing: 3 }));
+    this.creaturePreference = crisp(this.add.text(-145, -119, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#ead9ae' }));
+    this.creatureAmbition = crisp(this.add.text(-145, -102, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#ffd281', wordWrap: { width: 290 } }));
     this.creaturePanel.add([this.creatureName, this.creatureStatus, this.creatureRole, this.creaturePersonality, this.creaturePreference, this.creatureAmbition]);
     const meterDefs = [['hunger', 'NOURISHMENT', 0xf7bd62], ['hygiene', 'CLARITY', 0x65c7ff], ['happiness', 'RESONANCE', 0xbf78ff], ['health', 'INTEGRITY', 0x7af6bd], ['energy', 'CHARGE', 0xff8fcf]] as const;
     meterDefs.forEach(([key, label, color], index) => {
       const view = meter(this, -145, -78 + index * 29, 290, label, color);
       this.creaturePanel.add([view.title, view.back, view.fill]); this.meters.set(key, view);
     });
-    this.creatureSkills = crisp(this.add.text(-145, 76, '', { fontFamily: CODE_FONT, fontStyle: 'bold', fontSize: '9px', color: '#dff5ea', lineSpacing: 3 }));
+    this.creatureSkills = crisp(this.add.text(-145, 76, '', { fontFamily: CODE_FONT, fontStyle: 'bold', fontSize: '10px', color: '#f0fff7', lineSpacing: 4 }));
     this.creaturePanel.add(this.creatureSkills);
     const labels: Array<[string, string]> = [['FEED +', 'hunger'], ['WASH ≋', 'hygiene'], ['PLAY ✣', 'happiness']];
     labels.forEach(([label, need], index) => {
@@ -137,8 +137,8 @@ export class UIScene extends Phaser.Scene {
     this.topAccent.setSize(width, 2);
     this.resourcesText.setPosition(width - 18, 14); this.populationText.setPosition(width - 18, 35);
     this.objectiveText.setPosition(portrait ? 12 : width / 2, portrait ? 212 : 68).setOrigin(portrait ? 0 : 0.5, 0);
-    this.creaturePanel.setPosition(portrait ? width / 2 : 178, portrait ? height - 214 : height - 226).setScale(portrait ? 0.72 : 1);
-    this.buildingPanel.setPosition(portrait ? width / 2 : 182, portrait ? height - 190 : height - 182).setScale(portrait ? 0.78 : 1);
+    this.creaturePanel.setPosition(portrait ? width / 2 : 178, portrait ? height - 214 : height - 226).setScale(portrait ? 0.82 : 1);
+    this.buildingPanel.setPosition(portrait ? width / 2 : 182, portrait ? height - 190 : height - 182).setScale(portrait ? 0.82 : 1);
     this.buildButton.setPosition(portrait ? width - 84 : width - 92, height - 40);
     (this.children.getByName('profile-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? 68 : width - 230, height - 40);
     (this.children.getByName('save-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? 174 : width - 356, height - 40);
@@ -200,7 +200,7 @@ export class UIScene extends Phaser.Scene {
     if (state.chapter === 4 && state.time > 330 && !state.endingId) this.openDialogue('ending');
   }
   private renderCreature(creature: CreatureState) {
-    this.creatureName.setText(creature.name); this.creatureStatus.setText(creature.alive ? `${creature.task.toUpperCase()} · GEN ${creature.generation}` : 'SILENT').setColor(creature.alive ? '#90c9b0' : '#ff735f');
+    this.creatureName.setText(creature.name); this.creatureStatus.setText(creature.expeditionId ? `ON EXPEDITION · GEN ${creature.generation}` : creature.alive ? `${creature.task.toUpperCase()} · GEN ${creature.generation}` : 'SILENT').setColor(creature.alive ? '#90c9b0' : '#ff735f');
     this.creatureRole.setText(`${ROLE_LABELS[creature.assignedRole]}  ·  ${creature.autoRole ? 'SELF-DIRECTED' : 'ASSIGNED'}  ·  STRESS ${Math.round(creature.stress)}%`);
     const strongestBond = Object.entries(creature.bonds).sort((a, b) => b[1] - a[1])[0];
     const bondName = strongestBond ? this.state.creatures.find((candidate) => candidate.id === strongestBond[0])?.name : undefined;
@@ -221,7 +221,7 @@ export class UIScene extends Phaser.Scene {
         view.fill.setFillStyle((colors as Record<string, number>)[key]);
       }
     });
-    this.careButtons.forEach((control) => control.setAlpha(creature.alive ? 1 : 0.3));
+    this.careButtons.forEach((control) => control.setAlpha(creature.alive && !creature.expeditionId ? 1 : 0.3));
   }
   private renderBuilding(building: BuildingState) {
     const def = BUILDINGS[building.kind];
@@ -229,17 +229,28 @@ export class UIScene extends Phaser.Scene {
     const active = occupants.filter((creature) => creature.isBeingServed).length;
     const queued = Math.max(0, occupants.length - active);
     this.buildingName.setText(`${def.glyph}  ${buildingDisplayName(building).toUpperCase()}`);
-    this.buildingLevel.setText(`LEVEL ${building.level} / 2`);
-    this.buildingDetails.setText(`${def.description}\n\nCURRENT EFFECT\n${building.level >= 2 ? upgradeDescription(building, building.upgradeBranch ?? 'quality') : def.effect}\n\nINFLUENCE ${building.influenceRadius}m  ·  DURABILITY ${Math.round(building.durability)}%`);
+    this.buildingLevel.setText(`LEVEL ${building.level} / 3`);
+    const currentEffect = building.level >= 3 ? advancedUpgradeDescription(building) : building.level >= 2 ? upgradeDescription(building, building.upgradeBranch ?? 'quality').effect : def.effect;
+    this.buildingDetails.setText(`${def.description}\n\nCURRENT EFFECT\n${currentEffect}\n\nINFLUENCE ${building.influenceRadius}m  ·  DURABILITY ${Math.round(building.durability)}%`);
     this.buildingActivity.setText(`SERVICE STATIONS  ${active} / ${buildingCapacity(building)}\nWAITING IN QUEUE  ${queued}\nFACILITY STATUS  ${building.constructing ? `CONSTRUCTION ${Math.floor(building.constructionProgress)}%` : building.active ? 'ACTIVE' : 'OFFLINE'}`);
-    if (building.level >= 2) {
+    if (building.level >= 3) {
       this.buildingUpgradeCost.setText('MAXIMUM UPGRADE INSTALLED');
       this.upgradeButton.setAlpha(0.35).disableInteractive();
       this.capacityUpgradeButton.setAlpha(0.35).disableInteractive();
+    } else if (building.level === 2) {
+      const cost = advancedUpgradeCost(building); const affordable = canAffordAdvancedUpgrade(this.state.resources, this.state.livingWorld, building);
+      const rare = cost.wildSeed ? `${cost.wildSeed} WILD SEED` : `${cost.memoryCrystal} MEMORY CRYSTAL`;
+      this.buildingUpgradeCost.setText(`${advancedUpgradeDescription(building)}\nCOST ${cost.glow} GLOW · ${cost.alloy} ALLOY · ${rare}`);
+      (this.upgradeButton.getByName('button-label') as Phaser.GameObjects.Text)?.setText('ASCEND TO III');
+      this.upgradeButton.setAlpha(affordable ? 1 : 0.48).setVisible(true);
+      if (affordable) this.upgradeButton.setInteractive({ useHandCursor: true }); else this.upgradeButton.disableInteractive();
+      this.capacityUpgradeButton.setVisible(false);
     } else {
       const qualityCost = upgradeCost(building, 'quality'); const capacityCost = upgradeCost(building, 'capacity');
       const qualityAffordable = canAffordUpgrade(this.state.resources, building, 'quality'); const capacityAffordable = canAffordUpgrade(this.state.resources, building, 'capacity');
-      this.buildingUpgradeCost.setText(`QUALITY: ${upgradeDescription(building, 'quality')}  ·  ${qualityCost.glow}G/${qualityCost.alloy}A\nCAPACITY: ${upgradeDescription(building, 'capacity')}  ·  ${capacityCost.glow}G/${capacityCost.alloy}A`);
+      this.buildingUpgradeCost.setText(`QUALITY: ${upgradeDescription(building, 'quality').effect} · ${qualityCost.glow}G/${qualityCost.alloy}A\nCAPACITY: ${upgradeDescription(building, 'capacity').effect} · ${capacityCost.glow}G/${capacityCost.alloy}A`);
+      (this.upgradeButton.getByName('button-label') as Phaser.GameObjects.Text)?.setText('QUALITY PATH');
+      this.capacityUpgradeButton.setVisible(true);
       this.upgradeButton.setAlpha(qualityAffordable ? 1 : 0.48); this.capacityUpgradeButton.setAlpha(capacityAffordable ? 1 : 0.48);
       if (qualityAffordable) this.upgradeButton.setInteractive({ useHandCursor: true }); else this.upgradeButton.disableInteractive();
       if (capacityAffordable) this.capacityUpgradeButton.setInteractive({ useHandCursor: true }); else this.capacityUpgradeButton.disableInteractive();
@@ -250,14 +261,15 @@ export class UIScene extends Phaser.Scene {
     const completed = guided.filter((objective) => state.completedObjectives.includes(objective.id)).length;
     const current = guided.find((objective) => !state.completedObjectives.includes(objective.id));
     if (!current) { this.objectiveText.setText('GUIDED JOURNEY COMPLETE / THE HABITAT REMEMBERS'); return; }
-    const rewards = [`+${current.reward} GLOW`, current.alloyReward ? `+${current.alloyReward} ALLOY` : '', current.researchReward ? `+${current.researchReward} RP` : ''].filter(Boolean).join(' · ');
+    const rewards = [`+${current.reward} GLOW`, current.alloyReward ? `+${current.alloyReward} ALLOY` : '', current.researchReward ? `+${current.researchReward} RP` : '', current.wildSeedReward ? `+${current.wildSeedReward} SEED` : '', current.memoryCrystalReward ? `+${current.memoryCrystalReward} CRYSTAL` : ''].filter(Boolean).join(' · ');
     this.objectiveText.setText(`GUIDED STEP ${completed + 1} / ${guided.length}  ·  ${current.title.toUpperCase()}\n${current.hint}\nREWARD ${rewards}  ·  CLICK FOR HELP`);
   }
   private openObjectiveGuide() {
     const current = OBJECTIVES.filter((objective) => !objective.optional).find((objective) => !this.state.completedObjectives.includes(objective.id));
-    const roleOrResearch = current && ['assign-role', 'first-research'].includes(current.id);
-    const building = current && ['place-food', 'complete-food', 'place-wash', 'first-upgrade', 'complete-upgrade', 'place-play', 'industry'].includes(current.id);
-    this.scene.launch('GuideScene', { page: roleOrResearch ? 4 : building ? 2 : 0 });
+    const roleOrResearch = current && ['assign-role', 'first-research', 'advanced-research'].includes(current.id);
+    const building = current && ['place-food', 'complete-food', 'place-wash', 'first-upgrade', 'complete-upgrade', 'place-play', 'industry', 'advanced-upgrade'].includes(current.id);
+    const exploration = current && ['first-expedition', 'expedition-decision', 'region-3'].includes(current.id);
+    this.scene.launch('GuideScene', { page: exploration ? 6 : roleOrResearch ? 4 : building ? 2 : 0 });
   }
   private queueRecoveryIfNeeded(living: number) {
     if (living > 0) { this.recoveryTimer?.remove(false); this.recoveryTimer = undefined; return; }
@@ -278,10 +290,11 @@ export class UIScene extends Phaser.Scene {
   private upgradeSelectedBuilding(branch: 'quality' | 'capacity') {
     if (!this.selectedBuildingId) return;
     const building = this.state.buildings.find((candidate) => candidate.id === this.selectedBuildingId); if (!building) return;
-    if (gameStore.upgradeBuilding(building.id, branch)) {
-      this.showToast(`${branch === 'quality' ? 'Quality' : 'Capacity'} construction started · builders will carry the work`);
+    const advanced = building.level === 2;
+    if (advanced ? gameStore.advanceBuilding(building.id) : gameStore.upgradeBuilding(building.id, branch)) {
+      this.showToast(`${advanced ? 'Ascendant' : branch === 'quality' ? 'Quality' : 'Capacity'} construction started · builders will carry the work`);
       this.game.events.emit('glitch', 0.22);
-    } else this.showToast('Not enough GLOW or ALLOY for this upgrade');
+    } else this.showToast(advanced ? 'This evolution needs regional rare matter and resources' : 'Not enough GLOW or ALLOY for this upgrade');
   }
   private toggleBuildMenu() {
     if (this.buildMenu) { this.buildMenu.destroy(true); this.buildMenu = undefined; return; }

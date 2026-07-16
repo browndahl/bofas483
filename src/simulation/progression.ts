@@ -10,6 +10,8 @@ export interface ObjectiveDefinition {
   researchReward?: number;
   alloyReward?: number;
   reputationReward?: number;
+  wildSeedReward?: number;
+  memoryCrystalReward?: number;
   optional?: boolean;
 }
 
@@ -31,6 +33,11 @@ function isObjectiveMet(id: string, world: WorldState, living: number): boolean 
     case 'population-6': return living >= 6;
     case 'colony-level-2': return world.livingWorld.level >= 2;
     case 'industry': return world.buildings.some((building) => building.kind === 'extractor');
+    case 'first-expedition': return world.events.some((event) => event.type === 'expedition_complete');
+    case 'expedition-decision': return world.events.some((event) => event.type === 'expedition_decision');
+    case 'advanced-research': return Object.values(world.livingWorld.research).some((level) => level >= 3);
+    case 'advanced-upgrade': return world.buildings.some((building) => building.level >= 3);
+    case 'region-3': return world.livingWorld.unlockedRegions.length >= 3;
     case 'first-death': return world.deaths > 0;
     case 'ending': return Boolean(world.endingId);
     default: return false;
@@ -45,9 +52,11 @@ export function resolveObjectiveProgress(world: WorldState): WorldState {
     world.resources.alloy += objective.alloyReward ?? 0;
     world.livingWorld.researchPoints += objective.researchReward ?? 0;
     world.livingWorld.reputation += objective.reputationReward ?? 0;
+    world.livingWorld.rareResources.wildSeed += objective.wildSeedReward ?? 0;
+    world.livingWorld.rareResources.memoryCrystal += objective.memoryCrystalReward ?? 0;
     appendWorldEvent(world, {
       type: 'objective_complete', at: world.time,
-      payload: { id: objective.id, reward: objective.reward, alloyReward: objective.alloyReward ?? 0, researchReward: objective.researchReward ?? 0, reputationReward: objective.reputationReward ?? 0 }
+      payload: { id: objective.id, reward: objective.reward, alloyReward: objective.alloyReward ?? 0, researchReward: objective.researchReward ?? 0, reputationReward: objective.reputationReward ?? 0, wildSeedReward: objective.wildSeedReward ?? 0, memoryCrystalReward: objective.memoryCrystalReward ?? 0 }
     });
   };
   for (const objective of OBJECTIVES.filter((item) => !item.optional)) {
