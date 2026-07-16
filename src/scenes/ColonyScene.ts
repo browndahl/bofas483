@@ -3,6 +3,7 @@ import { RESEARCH_BRANCHES, relationshipStage } from '../simulation/livingWorld'
 import { OBJECTIVES } from '../simulation/progression';
 import { ROLE_LABELS, SKILL_KEYS, SKILL_LABELS, skillLevel } from '../simulation/colonyLife';
 import { expeditionResearchCost, REGIONS } from '../simulation/expeditions';
+import { regionalSummary } from '../simulation/regionalWorld';
 import { explainCreatureAction, relationshipTone } from '../simulation/colonyStories';
 import {
   colonyForecast,
@@ -35,6 +36,7 @@ export class ColonyScene extends Phaser.Scene {
   private header?: Phaser.GameObjects.Text;
   private tabs: Phaser.GameObjects.Container[] = [];
   private teamCursor = 0;
+  private selectedRegionId: RegionId = 'lumen-field';
   private historyFilter: 'all' | 'relationship' | 'story' | 'life' = 'all';
   private managementTab: ManagementTab = 'POLICIES';
   private rosterFilter: CreatureRole | 'all' | 'critical' = 'all';
@@ -361,39 +363,85 @@ export class ColonyScene extends Phaser.Scene {
   private renderExplore() {
     const { width } = this.dimensions(); const world = this.state.livingWorld; const compact = width < 600;
     const unresolved = [...world.expeditions].reverse().find((item) => item.status === 'active' || item.status === 'decision');
-    this.addText(0, 0, 'Send 2–3 Luma beyond the habitat. Teams leave the map, return alive with named outcomes, and ask you what their discoveries should become.', compact ? 9 : 11, '#dff5ea', width);
-    if (unresolved?.status === 'active') {
-      const region = REGIONS[unresolved.regionId]; const team = unresolved.creatureIds.map((id) => this.state.creatures.find((creature) => creature.id === id)?.name).filter(Boolean).join(' · ');
-      const total = Math.max(1, unresolved.returnAt - unresolved.startedAt); const progress = Phaser.Math.Clamp((this.state.time - unresolved.startedAt) / total, 0, 1);
-      this.addHeading(0, 62, `${region.glyph}  EXPEDITION ACTIVE / ${region.name.toUpperCase()}`, '#65c7ff');
-      this.addText(0, 88, `TEAM  ${team}\nRISK  ${unresolved.risk.toUpperCase()}  ·  RETURN IN ${Math.max(0, Math.ceil(unresolved.returnAt - this.state.time))}s`, 12, '#e4f7ed', width);
-      const back = this.add.rectangle(0, 145, width, 12, 0x211d15).setOrigin(0, 0.5).setStrokeStyle(1, 0x65c7ff); const fill = this.add.rectangle(0, 145, width * progress, 8, 0x65c7ff).setOrigin(0, 0.5); this.content?.add([back, fill]);
-      this.addText(0, 166, 'Their needs are safely paused from colony work. No expedition outcome can kill a Luma.', 11, '#90c9b0', width);
-      return;
-    }
     if (unresolved?.status === 'decision') {
       const region = REGIONS[unresolved.regionId];
-      this.addHeading(0, 62, `${region.glyph}  DECISION REQUIRED / ${region.name.toUpperCase()}`, '#ff8fcf');
-      this.addText(0, 91, `${unresolved.outcome}\n\nRETURNED  +${unresolved.glowReward} GLOW · +${unresolved.alloyReward} ALLOY`, 12, '#e4f7ed', width);
-      this.addText(0, 190, 'PRESERVE  +2 Wild Seed · +10 reputation · sustainability\nSALVAGE  +1 Memory Crystal · +20 ALLOY · ambition', 11, '#ffe1a0', width);
-      this.addButton(width * 0.25, 260, Math.min(250, width * 0.42), 'PRESERVE SITE', 0x7af6bd, () => gameStore.resolveExpedition(unresolved.id, 'preserve'));
-      this.addButton(width * 0.75, 260, Math.min(250, width * 0.42), 'SALVAGE RELIC', 0xff735f, () => gameStore.resolveExpedition(unresolved.id, 'salvage'));
+      this.addHeading(0, 0, `${region.glyph}  REGIONAL DECISION / ${region.name.toUpperCase()}`, '#ff8fcf');
+      this.addText(0, 30, `${unresolved.outcome}\n\nSCOUTING +${unresolved.scoutingReward ?? 0}%  ·  RETURNED +${unresolved.glowReward} GLOW / +${unresolved.alloyReward} ALLOY`, compact ? 10 : 12, '#e4f7ed', width);
+      this.addText(0, 150, 'PRESERVE makes future outposts more sustainable.\nSALVAGE creates faster routes and immediate industrial materials.', compact ? 9 : 11, '#ffe1a0', width);
+      this.addButton(width * 0.25, 225, Math.min(250, width * 0.42), 'PRESERVE SITE', 0x7af6bd, () => gameStore.resolveExpedition(unresolved.id, 'preserve'));
+      this.addButton(width * 0.75, 225, Math.min(250, width * 0.42), 'SALVAGE RELIC', 0xff735f, () => gameStore.resolveExpedition(unresolved.id, 'salvage'));
       return;
     }
-    const team = this.expeditionTeam(); const teamNames = team.map((creature) => `${creature.name} L${skillLevel(creature.skills.exploration)}`).join(' · ');
-    this.addHeading(0, compact ? 72 : 60, 'RECOMMENDED TEAM'); this.addText(0, compact ? 98 : 86, teamNames || 'At least two available Luma are required.', compact ? 10 : 12, '#e4f7ed', width - 170);
-    this.addButton(width - 75, compact ? 104 : 92, 146, 'CHANGE TEAM', 0x65c7ff, () => { this.teamCursor++; this.renderPage(); });
-    const regionIds = (Object.keys(REGIONS) as RegionId[]).filter((id) => id !== 'lumen-field');
+    const summary = regionalSummary(this.state); const regionIds = Object.keys(REGIONS) as RegionId[];
+    if (!world.unlockedRegions.includes(this.selectedRegionId)) this.selectedRegionId = world.unlockedRegions.at(-1) ?? 'lumen-field';
+    this.addText(0, 0, `REGIONAL NETWORK  ${summary.settled} OUTPOSTS · ${summary.staffed} STAFF · ${summary.routes} ROUTES · STORED ${Math.floor(summary.storedGlow)} GLOW / ${Math.floor(summary.storedAlloy)} ALLOY`, compact ? 8 : 10, '#90c9b0', width);
+    const tabWidth = (width - 16) / 5;
     regionIds.forEach((regionId, index) => {
-      const region = REGIONS[regionId]; const y = (compact ? 150 : 136) + index * (compact ? 112 : 104); const unlocked = world.unlockedRegions.includes(regionId); const affordable = this.state.resources.glow >= region.supply.glow && this.state.resources.alloy >= region.supply.alloy && team.length >= 2;
-      this.addHeading(0, y, compact ? `${region.glyph}  ${region.name.toUpperCase()}` : `${region.glyph}  ${region.name.toUpperCase()}  ·  ${unlocked ? region.risk.toUpperCase() : `LOCKED / LEVEL ${region.level}`}`, unlocked ? '#f7bd62' : '#6d8177');
-      const detail = compact ? `${unlocked ? region.risk.toUpperCase() : `PERMIT LEVEL ${region.level}`}\n${region.duration}s · ${region.supply.glow} GLOW / ${region.supply.alloy} ALLOY\nDISCOVERY ${region.discovery.toUpperCase()}` : `${region.description}\n${region.duration}s · ${region.supply.glow} GLOW / ${region.supply.alloy} ALLOY · DISCOVERY ${region.discovery.toUpperCase()}`;
-      this.addText(0, y + 25, detail, compact ? 9 : 10, unlocked ? '#dff5ea' : '#788b82', width - 180);
-      const control = this.addButton(width - 76, y + (compact ? 57 : 42), compact ? 146 : 160, unlocked ? 'BEGIN EXPEDITION' : 'PERMIT LOCKED', unlocked ? 0x7af6bd : 0x788b82, () => {
-        const result = gameStore.startExpedition(regionId, team.map((creature) => creature.id)); if (!result.ok) this.toast(result.reason ?? 'The expedition could not depart');
-      });
-      if (!unlocked || !affordable) control.setAlpha(0.45);
+      const region = REGIONS[regionId]; const unlocked = world.unlockedRegions.includes(regionId);
+      this.addButton(tabWidth / 2 + index * (tabWidth + 4), 42, tabWidth, compact ? `${region.glyph}${region.level}` : `${region.glyph} ${region.name.split(' ')[0]}`, this.selectedRegionId === regionId ? 0xf7bd62 : unlocked ? 0x65c7ff : 0x657069, () => {
+        if (unlocked) { this.selectedRegionId = regionId; this.renderPage(); }
+        else this.toast(`Habitat level ${region.level} unlocks ${region.name}`);
+      }).setAlpha(unlocked ? 1 : 0.42);
     });
+
+    const region = REGIONS[this.selectedRegionId]; const progress = world.regionProgress[this.selectedRegionId];
+    const outpost = world.outposts.find((item) => item.regionId === this.selectedRegionId);
+    const route = world.supplyRoutes.find((item) => item.regionId === this.selectedRegionId);
+    const visitor = world.regionalVisitors.find((item) => item.regionId === this.selectedRegionId && item.status === 'waiting');
+    this.addHeading(0, 77, `${region.glyph}  ${region.name.toUpperCase()}  /  ${progress.status.toUpperCase()}`, this.selectedRegionId === world.activeRegion ? '#7af6bd' : '#f7bd62');
+    this.addText(0, 103, `${region.description}\nSCOUTED ${Math.floor(progress.scouting)}% · HAZARD ${progress.hazard.toUpperCase()} · VISITS ${progress.visits} · DISCOVERY ${progress.discovered.map((item) => item.replaceAll('-', ' ')).join(' · ').toUpperCase() || 'NONE'}`, compact ? 8 : 10, '#dff5ea', width - 160);
+    this.addButton(width - 77, 100, 150, this.selectedRegionId === world.activeRegion ? 'VIEWING REGION' : 'VIEW REGION', 0x7af6bd, () => {
+      if (gameStore.setActiveRegion(this.selectedRegionId)) { this.game.events.emit('toast', `Viewing ${region.name} · press M to cycle regions`); this.scene.stop(); }
+    });
+
+    if (unresolved?.status === 'active') {
+      const activeRegion = REGIONS[unresolved.regionId]; const total = Math.max(1, unresolved.returnAt - unresolved.startedAt); const expeditionProgress = Phaser.Math.Clamp((this.state.time - unresolved.startedAt) / total, 0, 1);
+      this.addHeading(0, 163, `EXPEDITION ACTIVE / ${activeRegion.name.toUpperCase()}`, '#65c7ff');
+      const back = this.add.rectangle(0, 194, width, 10, 0x211d15).setOrigin(0, 0.5).setStrokeStyle(1, 0x65c7ff); const fill = this.add.rectangle(0, 194, width * expeditionProgress, 6, 0x65c7ff).setOrigin(0, 0.5); this.content?.add([back, fill]);
+      this.addText(0, 207, `RETURN IN ${Math.max(0, Math.ceil(unresolved.returnAt - this.state.time))}s · ${unresolved.creatureIds.map((id) => this.state.creatures.find((creature) => creature.id === id)?.name).filter(Boolean).join(' · ')}`, compact ? 8 : 10, '#dff5ea', width);
+    } else if (this.selectedRegionId !== 'lumen-field') {
+      const team = this.expeditionTeam(); const teamNames = team.map((creature) => `${creature.name} L${skillLevel(creature.skills.exploration)}`).join(' · ');
+      this.addHeading(0, 163, `SCOUTING TEAM / ${teamNames || 'TWO AVAILABLE LUMA REQUIRED'}`, '#65c7ff');
+      this.addButton(width - 75, 166, 145, 'CHANGE TEAM', 0x65c7ff, () => { this.teamCursor++; this.renderPage(); });
+      const scout = this.addButton(width * 0.5, 212, Math.min(350, width * 0.7), progress.scouting >= 100 ? 'REVISIT DISCOVERY SITE' : `SCOUT REGION · ${region.supply.glow} GLOW / ${region.supply.alloy} ALLOY`, 0x7af6bd, () => {
+        const result = gameStore.startExpedition(this.selectedRegionId, team.map((creature) => creature.id)); if (!result.ok) this.toast(result.reason ?? 'The expedition could not depart');
+      });
+      if (team.length < 2) scout.setAlpha(0.45);
+    } else {
+      this.addText(0, 170, 'This is the habitat’s protected home region. Establish a regional network to gather resources and welcome distant Luma.', compact ? 9 : 11, '#dff5ea', width);
+    }
+
+    const outpostY = 256;
+    this.addHeading(0, outpostY, 'PERSISTENT OUTPOST');
+    if (this.selectedRegionId === 'lumen-field') {
+      this.addText(0, outpostY + 28, 'Home facilities, colony management, and construction remain in Lumen Field.', compact ? 9 : 11, '#90c9b0', width);
+      return;
+    }
+    if (!outpost) {
+      const cost = { glow: 80 + region.level * 12, alloy: 24 + region.level * 6 };
+      this.addText(0, outpostY + 28, progress.scouting < 100 ? `Complete regional scouting before establishing a permanent relay. ${100 - Math.floor(progress.scouting)}% remains.` : `A relay makes this region persistent and can support four trained Luma.\nCOST ${cost.glow} GLOW / ${cost.alloy} ALLOY`, compact ? 9 : 11, '#dff5ea', width - 190);
+      const control = this.addButton(width - 85, outpostY + 40, 165, 'ESTABLISH OUTPOST', 0xf7bd62, () => {
+        const result = gameStore.establishOutpost(this.selectedRegionId as Exclude<RegionId, 'lumen-field'>); if (!result.ok) this.toast(result.reason ?? gameStore.actionError());
+      });
+      if (progress.scouting < 100) control.setAlpha(0.42);
+      return;
+    }
+    const staff = outpost.staffIds.map((id) => this.state.creatures.find((creature) => creature.id === id)?.name).filter(Boolean);
+    this.addText(0, outpostY + 27, `${outpost.name.toUpperCase()} · CONDITION ${Math.floor(outpost.condition)}% · SUPPLIES ${Math.floor(outpost.supplies.glow)} GLOW\nSTORAGE ${Math.floor(outpost.storage.glow)}/${outpost.storageCapacity} GLOW · ${Math.floor(outpost.storage.alloy)}/${outpost.storageCapacity} ALLOY\nSTAFF ${staff.join(' · ') || 'NONE — NO REGIONAL PRODUCTION'}`, compact ? 8 : 10, outpost.condition < 45 ? '#ff9b89' : '#dff5ea', width - 180);
+    this.addButton(width - 82, outpostY + 39, 160, route ? `${route.active ? 'PAUSE' : 'RESUME'} ROUTE` : 'BUILD SUPPLY ROUTE', 0xbf78ff, () => {
+      const result = gameStore.toggleSupplyRoute(outpost.id); if (!result.ok) this.toast(result.reason ?? gameStore.actionError());
+    });
+    const available = this.state.creatures.filter((creature) => creature.alive && (!creature.expeditionId || outpost.staffIds.includes(creature.id)))
+      .sort((a, b) => Number(outpost.staffIds.includes(b.id)) - Number(outpost.staffIds.includes(a.id)) || b.skills.exploration - a.skills.exploration);
+    const candidate = available[this.teamCursor % Math.max(1, available.length)];
+    this.addText(0, outpostY + 104, route ? `ROUTE ${route.active ? 'ACTIVE' : 'PAUSED'} · NEXT ${Math.max(0, Math.ceil(route.nextDeliveryAt - this.state.time))}s · DELIVERED ${route.delivered.glow} GLOW / ${route.delivered.alloy} ALLOY` : 'No supply route: stored materials remain at the outpost.', compact ? 8 : 10, route?.active ? '#7af6bd' : '#90c9b0', width - 190);
+    if (candidate) this.addButton(width - 82, outpostY + 111, 160, `${outpost.staffIds.includes(candidate.id) ? 'RETURN' : 'STATION'} ${candidate.name.toUpperCase()}`, outpost.staffIds.includes(candidate.id) ? 0xff735f : 0x7af6bd, () => gameStore.toggleOutpostStaff(outpost.id, candidate.id));
+    if (visitor) {
+      this.addHeading(0, outpostY + 155, `VISITOR / ${visitor.name.toUpperCase()} · ${visitor.trait.replaceAll('-', ' ').toUpperCase()}`, '#ff8fcf');
+      this.addText(0, outpostY + 181, `${visitor.name} followed the regional route and asks to join Habitat 483.`, compact ? 8 : 10, '#dff5ea', width - 260);
+      this.addButton(width - 194, outpostY + 184, 115, 'WELCOME', 0x7af6bd, () => gameStore.answerRegionalVisitor(visitor.id, true));
+      this.addButton(width - 65, outpostY + 184, 115, 'FAREWELL', 0xff735f, () => gameStore.answerRegionalVisitor(visitor.id, false));
+    }
   }
 
   private renderLuma() {
@@ -487,7 +535,7 @@ export class ColonyScene extends Phaser.Scene {
     this.addButton(right, sectionY + 240, controlWidth, `SPEED ${settings.simulationSpeed}×`, 0x7af6bd, () => gameStore.cycleSpeed());
     this.addButton(width * 0.27, sectionY + 278, compact ? 164 : 190, `ALERTS ${settings.alertLevel.toUpperCase()}`, 0x65c7ff, () => gameStore.updateSetting('alertLevel', settings.alertLevel === 'all' ? 'important' : settings.alertLevel === 'important' ? 'critical' : 'all'));
     this.addButton(width * 0.73, sectionY + 278, compact ? 164 : 190, 'FULLSCREEN', 0xff8fcf, () => this.scale.isFullscreen ? this.scale.stopFullscreen() : this.scale.startFullscreen());
-    this.addText(0, sectionY + 310, 'KEYS  SPACE pause · 1/2/3 speed · O overlay · R order · X clear · P photo · G guide · ESC close', compact ? 8 : 10, '#90c9b0', width);
+    this.addText(0, sectionY + 310, 'KEYS  SPACE pause · 1/2/3 speed · M region · O overlay · R order · X clear · P photo · G guide · ESC close', compact ? 8 : 10, '#90c9b0', width);
   }
 
   private renderSaves() {
@@ -521,8 +569,8 @@ export class ColonyScene extends Phaser.Scene {
 
   private renderChangelog() {
     const { width } = this.dimensions();
-    this.addHeading(0, 0, 'MANAGEMENT 2.0 / MAP CONTROL  /  2026.07');
-    this.addText(0, 30, 'LIVE MAP OVERLAYS\nZones reveal crew territory. Capacity shows every facility’s influence, service stations, queue, and durability. Traffic exposes active navigation paths, congestion heat, selected-task reasoning, and blocked-route causes. Orders show direct assignments and their destinations.\n\nDIRECT COMMAND\nSelect a Luma and issue MOVE, OPERATE, CONSTRUCT, MAINTAIN, REST, or RECREATE orders directly on the habitat. Emergency needs retain safety priority. Orders expire safely, can be cleared instantly, and preserve autonomous behavior afterward.\n\nDRAG STAFFING & EDITABLE ZONES\nIn Orders view, drag a Luma onto an active facility to assign preferred staffing. Crew zone centers and radii can be adjusted from the Map workspace without restricting urgent care or required work.\n\nCUSTOM DAYS & PRESETS\nEvery Luma can use an eight-block custom day made from Rest, Free, and Work periods. Colony-wide Balanced, Emergency, Growth, and Relaxed presets provide fast strategic changes while individual policy edits create a Custom plan.\n\nFORECASTS & HISTORY GRAPHS\nWarnings now state the numerical cause and likely fix. Rolling graphs track GLOW, ALLOY, average wellbeing, and queue pressure across the latest simulation samples.\n\nGUIDED MANAGEMENT\nA four-step contextual lesson introduces overlays, presets, zone editing, and direct orders. The complete system migrates existing saves to version 8 and remains bounded for large colonies.', 12, '#e4f7ed', width);
+    this.addHeading(0, 0, 'REGIONAL EXPANSION 2.0  /  2026.07');
+    this.addText(0, 30, 'PERSISTENT REGIONS\nEvery unlocked region now has scouting progress, a local hazard, discoveries, visits, and its own live field view. Select regions from COLONY → EXPLORE or press M on the map.\n\nOUTPOST COLONIES\nFully scout a region, establish a relay, and station up to four trained Luma. Outpost staff visibly occupy the regional map, gain Exploration skill, gather local GLOW and ALLOY, use supplies, and maintain relay condition against environmental pressure.\n\nSUPPLY NETWORK\nBuild and pause persistent routes. Active routes move stored production home every minute, restock regional supplies, track lifetime deliveries, and participate in safe offline simulation.\n\nDISCOVERIES & VISITORS\nPreserve or salvage now changes the region’s persistent development style. Staffed outposts attract named regional visitors with distinct voices, traits, and personal histories.\n\nWORLD MAP PRESENTATION\nRegional maps have distinct color atmospheres, scouting fog, relay markers, route lines, travelling expedition signals, and region-aware creature/building visibility.\n\nGUIDED PROGRESSION\nThree new journey steps teach full scouting, the first outpost, and the first supply route. The Field Guide explains every regional rule, cost, and safety guarantee. Existing colonies migrate automatically to save version 9.', 12, '#e4f7ed', width);
   }
 
   private shutdown() { this.unsubscribe?.(); this.unsubscribe = undefined; this.scale.off('resize', this.rebuild, this); this.input.keyboard?.removeAllListeners(); }

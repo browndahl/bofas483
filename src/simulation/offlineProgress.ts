@@ -12,6 +12,9 @@ export interface OfflineSummary {
   livingAtStart: number;
   livingAtEnd: number;
   importantEvents: string[];
+  regionalGlow: number;
+  regionalAlloy: number;
+  activeOutposts: number;
 }
 
 const MAX_OFFLINE_SECONDS = 15 * 60;
@@ -31,6 +34,8 @@ export function advanceOfflineWorld(world: WorldState, elapsedSeconds: number): 
   const before = structuredClone(world);
   const initialCount = before.creatures.length;
   const initialCloseBonds = closeBondCount(before.creatures);
+  const initialRegionalGlow = before.livingWorld.supplyRoutes.reduce((sum, route) => sum + route.delivered.glow, 0);
+  const initialRegionalAlloy = before.livingWorld.supplyRoutes.reduce((sum, route) => sum + route.delivered.alloy, 0);
   const configuredLimit = Math.max(0, Math.min(240, world.livingWorld?.settings.offlineLimitMinutes ?? 15)) * 60;
   if (configuredLimit === 0) return { state: world };
   const simulatedSeconds = Math.min(configuredLimit || MAX_OFFLINE_SECONDS, elapsedSeconds);
@@ -72,7 +77,10 @@ export function advanceOfflineWorld(world: WorldState, elapsedSeconds: number): 
     protectedLuma: protectedIds.size,
     livingAtStart: before.creatures.filter((creature) => creature.alive).length,
     livingAtEnd: state.creatures.filter((creature) => creature.alive).length,
-    importantEvents: state.livingWorld.journal.slice(before.livingWorld.journal.length).slice(-4).map((entry) => entry.title)
+    importantEvents: state.livingWorld.journal.slice(before.livingWorld.journal.length).slice(-4).map((entry) => entry.title),
+    regionalGlow: state.livingWorld.supplyRoutes.reduce((sum, route) => sum + route.delivered.glow, 0) - initialRegionalGlow,
+    regionalAlloy: state.livingWorld.supplyRoutes.reduce((sum, route) => sum + route.delivered.alloy, 0) - initialRegionalAlloy,
+    activeOutposts: state.livingWorld.outposts.filter((outpost) => outpost.staffIds.length > 0).length
   };
   return { state, summary };
 }

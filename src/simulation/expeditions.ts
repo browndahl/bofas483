@@ -1,5 +1,6 @@
 import type { ExpeditionChoice, ExpeditionState, RegionId, ResearchBranch, WorldState } from './worldState';
 import { appendWorldEvent } from './worldState';
+import { recordRegionDecision, recordRegionScouting } from './regionalWorld';
 
 export interface RegionDefinition {
   id: RegionId;
@@ -74,7 +75,9 @@ export function updateExpeditions(world: WorldState) {
     const outcome = success
       ? `${lead?.name ?? 'The team'} followed a buried signal to ${region.discovery.toLowerCase()}. The site is intact, but taking from it will change what remains.`
       : `${lead?.name ?? 'The team'} led everyone home through hostile terrain. They found a damaged ${region.discovery.toLowerCase()} cache and returned shaken but alive.`;
+    const scoutingReward = recordRegionScouting(world, expedition.regionId as Exclude<RegionId, 'lumen-field'>, success);
     expedition.status = 'decision'; expedition.success = success; expedition.glowReward = glowReward; expedition.alloyReward = alloyReward; expedition.outcome = outcome;
+    expedition.progress = 1; expedition.scoutingReward = scoutingReward;
     world.resources.glow += glowReward; world.resources.alloy += alloyReward; world.livingWorld.reputation += success ? 8 + regionIndex * 2 : 3;
     team.forEach((creature, index) => {
       creature.expeditionId = undefined; creature.x = 740 + index * 54; creature.y = 530 + index * 18; creature.target = { x: creature.x, y: creature.y };
@@ -93,6 +96,7 @@ export function resolveExpeditionDecision(world: WorldState, expeditionId: strin
   const expedition = world.livingWorld.expeditions.find((item) => item.id === expeditionId && item.status === 'decision');
   if (!expedition) return false;
   const region = REGIONS[expedition.regionId]; expedition.status = 'complete'; expedition.choice = choice;
+  recordRegionDecision(world, expedition.regionId as Exclude<RegionId, 'lumen-field'>, choice);
   if (choice === 'preserve') {
     world.livingWorld.rareResources.wildSeed += 2; world.livingWorld.reputation += 10; world.profile.sustainability += 2; world.profile.empathy += 1;
   } else {
