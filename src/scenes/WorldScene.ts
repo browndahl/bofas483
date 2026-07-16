@@ -7,6 +7,7 @@ import {
   soundscapeNotes,
   weatherAmbienceFrequency
 } from '../rendering/presentation';
+import { dioramaDepth, dioramaScaleAtY, dioramaShadowAlpha, dioramaShadowOffset } from '../rendering/diorama';
 import { BUILDINGS, buildingCapacity, buildingDisplayName, materialDeliveryRatio } from '../simulation/building';
 import { COLONY_OVERLAYS } from '../simulation/colonyManagement';
 import { REGIONS } from '../simulation/expeditions';
@@ -42,8 +43,17 @@ interface CreatureView {
 interface AmbientMote { node: Phaser.GameObjects.Rectangle; originX: number; originY: number; phase: number; speed: number }
 interface FoliageTuft { node: Phaser.GameObjects.Rectangle; phase: number }
 interface WaterGlint { node: Phaser.GameObjects.Arc; phase: number }
+interface DioramaScenery {
+  container: Phaser.GameObjects.Container;
+  canopy: Phaser.GameObjects.Graphics;
+  shadow: Phaser.GameObjects.Ellipse;
+  baseY: number;
+  phase: number;
+}
 interface BuildingView {
   container: Phaser.GameObjects.Container;
+  structure: Phaser.GameObjects.Container;
+  shadow: Phaser.GameObjects.Ellipse;
   halo: Phaser.GameObjects.Rectangle;
   core: Phaser.GameObjects.Rectangle;
   activity: Phaser.GameObjects.Graphics;
@@ -88,6 +98,9 @@ export class WorldScene extends Phaser.Scene {
   private ambientMotes: AmbientMote[] = [];
   private foliage: FoliageTuft[] = [];
   private waterGlints: WaterGlint[] = [];
+  private dioramaScenery: DioramaScenery[] = [];
+  private dioramaLighting!: Phaser.GameObjects.Graphics;
+  private dioramaVignette!: Phaser.GameObjects.Graphics;
   private pollutionSignature = '';
   private audioContext?: AudioContext;
   private noiseBuffer?: AudioBuffer;
@@ -109,15 +122,18 @@ export class WorldScene extends Phaser.Scene {
 
   constructor() { super('WorldScene'); }
   create() {
-    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT).setZoom(this.baseZoom()).centerOn(800, 500);
+    this.cameras.main.setBackgroundColor('#10150c').setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT).setZoom(this.baseZoom()).centerOn(800, 500);
     this.drawHabitat();
     this.pollutionGraphics = this.add.graphics().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
     this.relationshipGraphics = this.add.graphics().setDepth(8).setBlendMode(Phaser.BlendModes.ADD);
     this.pathGraphics = this.add.graphics().setDepth(1);
     this.regionalGraphics = this.add.graphics().setDepth(5);
-    this.managementGraphics = this.add.graphics().setDepth(9).setBlendMode(Phaser.BlendModes.ADD);
-    this.weatherGraphics = this.add.graphics().setDepth(4).setBlendMode(Phaser.BlendModes.ADD);
+    this.managementGraphics = this.add.graphics().setDepth(37).setBlendMode(Phaser.BlendModes.ADD);
+    this.weatherGraphics = this.add.graphics().setDepth(34).setBlendMode(Phaser.BlendModes.ADD);
+    this.dioramaLighting = this.add.graphics().setDepth(33).setBlendMode(Phaser.BlendModes.ADD);
+    this.dioramaVignette = this.add.graphics().setDepth(39).setScrollFactor(0);
     this.dayOverlay = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_WIDTH, WORLD_HEIGHT, 0x08152a, 0).setDepth(40).setBlendMode(Phaser.BlendModes.MULTIPLY);
+    this.drawVignette();
     this.configureInput();
     this.createManagementToolbar();
     for (let i = 0; i < 42; i++) this.effectPool.push(this.add.rectangle(0, 0, 5, 5, 0x7af6bd, 0).setDepth(18));
@@ -143,8 +159,12 @@ export class WorldScene extends Phaser.Scene {
   private drawHabitat() {
     this.habitatImage = this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'habitat-pixel-map').setDisplaySize(WORLD_WIDTH, WORLD_HEIGHT).setDepth(0);
     const frame = this.add.graphics().setDepth(1);
+    frame.fillStyle(0x1b130c, 0.96).fillRect(8, WORLD_HEIGHT - 30, WORLD_WIDTH - 16, 24);
+    frame.fillStyle(0x332419, 0.9).fillTriangle(8, WORLD_HEIGHT - 30, 38, WORLD_HEIGHT - 54, WORLD_WIDTH - 38, WORLD_HEIGHT - 54);
+    frame.fillStyle(0x0e0b07, 0.72).fillTriangle(WORLD_WIDTH - 34, 14, WORLD_WIDTH - 8, 38, WORLD_WIDTH - 8, WORLD_HEIGHT - 8);
     frame.lineStyle(5, 0x3a2918, 0.75).strokeRect(6, 6, WORLD_WIDTH - 12, WORLD_HEIGHT - 12);
     frame.lineStyle(2, 0xc9aa64, 0.35).strokeRect(13, 13, WORLD_WIDTH - 26, WORLD_HEIGHT - 26);
+    frame.lineStyle(2, 0xf3d38b, 0.16).lineBetween(18, 18, WORLD_WIDTH - 20, 18);
 
     for (let i = 0; i < 44; i++) {
       const originX = (i * 197 + 47) % WORLD_WIDTH;
@@ -161,7 +181,45 @@ export class WorldScene extends Phaser.Scene {
       const glint = this.add.circle(x, y, 3 + index % 2, 0xa5ffff, 0.3).setDepth(3).setBlendMode(Phaser.BlendModes.ADD);
       this.waterGlints.push({ node: glint, phase: index * 1.37 });
     });
+    this.createDioramaScenery();
     crisp(this.add.text(52, 42, 'HABITAT 483  ·  LUMEN FIELD', { fontFamily: DISPLAY_FONT, fontSize: '13px', color: '#fff1ba', backgroundColor: '#3a2918cc', padding: { x: 9, y: 5 }, letterSpacing: 1 })).setDepth(3);
+  }
+  private createDioramaScenery() {
+    const trees = [
+      [78, 205, 1.08], [72, 420, 1.18], [80, 650, 1.12], [96, 865, 1.2],
+      [310, 92, 0.92], [540, 86, 0.86], [1255, 88, 0.92], [1480, 210, 1.08],
+      [1500, 445, 1.16], [1490, 690, 1.1], [1400, 905, 1.18], [1160, 930, 1.08],
+      [570, 925, 1.1], [270, 910, 1.16]
+    ] as const;
+    trees.forEach(([x, y, scale], index) => {
+      const shadow = this.add.ellipse(8, 6, 76, 22, 0x10170b, 0.42);
+      const trunk = this.add.graphics();
+      trunk.fillStyle(0x2e1d15, 1).fillRect(-11, -54, 25, 60).fillRect(-20, -3, 20, 8).fillRect(7, -2, 22, 7);
+      trunk.fillStyle(0x68442b, 1).fillRect(-6, -51, 14, 51).fillStyle(0x9b6840, 0.66).fillRect(-4, -48, 5, 43);
+      const canopy = this.add.graphics();
+      const dark = index % 3 === 0 ? 0x245d31 : 0x2d6d37;
+      const mid = index % 4 === 0 ? 0x438b42 : 0x3c8040;
+      canopy.fillStyle(0x173f28, 1).fillRect(-43, -104, 86, 56).fillRect(-32, -120, 64, 76);
+      canopy.fillStyle(dark, 1).fillRect(-51, -91, 34, 38).fillRect(18, -96, 36, 42).fillRect(-31, -128, 62, 42);
+      canopy.fillStyle(mid, 1).fillRect(-36, -111, 29, 30).fillRect(3, -119, 31, 31).fillRect(-14, -136, 28, 26);
+      canopy.fillStyle(0x72a94b, 0.8).fillRect(-29, -116, 12, 8).fillRect(8, -126, 13, 7).fillRect(28, -101, 9, 7);
+      const fireflies = this.add.graphics().fillStyle(0xc8ff92, 0.55).fillRect(-39, -74, 3, 3).fillRect(32, -83, 3, 3);
+      const container = this.add.container(x, y, [shadow, trunk, canopy, fireflies])
+        .setScale(scale)
+        .setScrollFactor(0.97 + y / WORLD_HEIGHT * 0.06)
+        .setDepth(dioramaDepth(y, 0.45));
+      this.dioramaScenery.push({ container, canopy, shadow, baseY: y, phase: index * 0.63 });
+    });
+  }
+  private drawVignette() {
+    const width = this.scale.width; const height = this.scale.height;
+    this.dioramaVignette.clear();
+    const edge = Math.max(36, Math.min(120, Math.min(width, height) * 0.12));
+    for (let index = 0; index < 5; index++) {
+      const inset = index * edge / 5;
+      const alpha = 0.085 - index * 0.012;
+      this.dioramaVignette.lineStyle(edge / 5 + 2, 0x030604, alpha).strokeRect(inset, inset, Math.max(1, width - inset * 2), Math.max(1, height - inset * 2));
+    }
   }
   private configureInput() {
     this.input.mouse?.disableContextMenu();
@@ -281,6 +339,7 @@ export class WorldScene extends Phaser.Scene {
   }
   private handleResize = () => {
     if (this.scale.width < 650 || this.cameras.main.zoom < 0.7) this.cameras.main.setZoom(this.baseZoom());
+    this.drawVignette();
     this.refreshManagementToolbar();
   };
   private handleCare = (need: 'hunger' | 'hygiene' | 'happiness') => {
@@ -296,7 +355,13 @@ export class WorldScene extends Phaser.Scene {
   };
   private focusCreature = (id: string) => {
     const creature = this.state.creatures.find((c) => c.id === id);
-    if (creature) { this.selectedId = id; this.syncState(this.state); this.cameras.main.pan(creature.x, creature.y, 420, 'Sine.easeInOut'); this.game.events.emit('creature-selected', creature); }
+    if (creature) {
+      this.selectedId = id;
+      this.syncState(this.state);
+      this.cameras.main.pan(creature.x, creature.y - 32, 420, 'Sine.easeInOut');
+      if (!this.state.livingWorld.settings.reducedMotion) this.cameras.main.zoomTo(Math.max(this.cameras.main.zoom, Phaser.Math.Clamp(this.baseZoom() * 1.14, 0.82, 1.18)), 420, 'Sine.easeInOut');
+      this.game.events.emit('creature-selected', creature);
+    }
   };
   private handleBuildSelect = (kind: BuildingKind) => {
     if (this.state.livingWorld.activeRegion !== 'lumen-field') {
@@ -311,7 +376,7 @@ export class WorldScene extends Phaser.Scene {
     const clearance = this.add.circle(0, 0, 112, 0x000000, 0).setStrokeStyle(2, 0x7af6bd, 0.7);
     const glyph = crisp(this.add.text(0, 0, def.glyph, { fontFamily: UI_FONT, fontSize: '28px', color: '#071410' })).setOrigin(0.5);
     const status = crisp(this.add.text(0, 154, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#eafff4', backgroundColor: '#1f2a20ee', padding: { x: 8, y: 5 }, align: 'center' })).setOrigin(0.5);
-    this.placementGhost = this.add.container(800, 500, [influence, clearance, base, glyph, status]).setDepth(20);
+    this.placementGhost = this.add.container(800, 500, [influence, clearance, base, glyph, status]).setDepth(36);
     const pointer = this.input.activePointer;
     const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
     this.placementGhost.setPosition(point.x, point.y);
@@ -334,18 +399,18 @@ export class WorldScene extends Phaser.Scene {
     if (showMessage) this.game.events.emit('toast', 'Building placement cancelled');
   }
   private createCreatureView(creature: CreatureState): CreatureView {
-    const shadow = this.add.ellipse(2, 29, 48, 13, 0x18200e, 0.48);
+    const shadow = this.add.ellipse(2, 31, 54, 15, 0x10170b, 0.48);
     const aura = this.add.circle(0, 0, 34, Phaser.Display.Color.HSVToRGB(creature.hue / 360, 0.52, 0.96).color, 0.1).setBlendMode(Phaser.BlendModes.ADD);
     const selection = this.add.circle(0, 0, 34, 0x000000, 0).setStrokeStyle(3, 0xffec9c, 0);
     const body = this.add.graphics(); const eyes = this.add.graphics(); const gesture = this.add.graphics();
     const pose = this.add.container(0, 0, [body, eyes, gesture]);
     const status = crisp(this.add.text(29, -34, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: '#071410', backgroundColor: '#f7bd62', padding: { x: 4, y: 2 } })).setOrigin(0.5).setVisible(false);
-    const actor = this.add.container(0, 0, [aura, selection, pose, status]);
+    const actor = this.add.container(0, -8, [aura, selection, pose, status]);
     const label = crisp(this.add.text(0, 45, creature.name, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#fff1ba', backgroundColor: '#352816e8', padding: { x: 7, y: 4 } })).setOrigin(0.5).setStroke('#20170d', 1);
     const thoughtTail = this.add.triangle(0, 16, 0, 0, 10, 0, 5, 7, 0xfff3c4, 0.96).setOrigin(0.5, 0);
     const thoughtText = crisp(this.add.text(0, 0, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#2c2417', backgroundColor: '#fff3c4', padding: { x: 7, y: 4 }, align: 'center' })).setOrigin(0.5);
     const thought = this.add.container(0, -69, [thoughtTail, thoughtText]).setVisible(false);
-    const container = this.add.container(creature.x, creature.y, [shadow, actor, label, thought]).setSize(82, 110).setDepth(10).setInteractive({ useHandCursor: true });
+    const container = this.add.container(creature.x, creature.y, [shadow, actor, label, thought]).setSize(82, 110).setDepth(dioramaDepth(creature.y, 0.2)).setInteractive({ useHandCursor: true });
     this.input.setDraggable(container, this.state.livingWorld.management.overlay === 'orders');
     const serial = Number(creature.id.replace(/\D/g, '')) || 1;
     const view: CreatureView = {
@@ -374,7 +439,7 @@ export class WorldScene extends Phaser.Scene {
     });
     container.on('dragstart', () => {
       if (this.state.livingWorld.management.overlay !== 'orders') return;
-      this.managementDragId = creature.id; this.dragging = false; container.setDepth(25);
+      this.managementDragId = creature.id; this.dragging = false; container.setDepth(38);
     });
     container.on('drag', (_pointer: Phaser.Input.Pointer, dragX: number, dragY: number) => {
       if (this.managementDragId !== creature.id) return;
@@ -382,7 +447,7 @@ export class WorldScene extends Phaser.Scene {
     });
     container.on('dragend', () => {
       if (this.managementDragId !== creature.id) return;
-      this.managementDragId = undefined; container.setDepth(10);
+      this.managementDragId = undefined; container.setDepth(dioramaDepth(container.y, 0.2));
       const current = this.state.creatures.find((candidate) => candidate.id === creature.id) ?? creature;
       const building = this.state.buildings.filter((candidate) => candidate.active && !candidate.constructing)
         .sort((a, b) => Math.hypot(a.x - container.x, a.y - container.y) - Math.hypot(b.x - container.x, b.y - container.y))[0];
@@ -509,8 +574,19 @@ export class WorldScene extends Phaser.Scene {
   }
   private createBuildingView(building: BuildingState) {
     const def = BUILDINGS[building.kind];
-    const shadow = this.add.ellipse(4, 30, 92, 22, 0x1d2411, 0.52);
+    const shadow = this.add.ellipse(7, 43, 112, 31, 0x10170b, 0.52);
+    const plinth = this.add.graphics();
+    plinth.fillStyle(0x2a1d13, 1).fillPoints([{ x: -52, y: 24 }, { x: 0, y: 47 }, { x: 0, y: 59 }, { x: -52, y: 36 }], true);
+    plinth.fillStyle(0x49301c, 1).fillPoints([{ x: 0, y: 47 }, { x: 52, y: 24 }, { x: 52, y: 36 }, { x: 0, y: 59 }], true);
+    plinth.fillStyle(0x85613a, 1).fillTriangle(0, 1, 52, 24, 0, 47).fillTriangle(0, 1, -52, 24, 0, 47);
+    plinth.lineStyle(2, 0xd0ad68, 0.45).lineBetween(0, 2, 52, 24).lineBetween(0, 2, -52, 24);
     const halo = this.add.rectangle(0, 0, 76, 62, def.color, 0.07).setBlendMode(Phaser.BlendModes.ADD);
+    const roof = this.add.graphics();
+    const roofDark = Phaser.Display.Color.ValueToColor(def.color).clone().darken(52).color;
+    const roofLight = Phaser.Display.Color.ValueToColor(def.color).clone().lighten(12).color;
+    roof.fillStyle(roofDark, 0.96).fillTriangle(0, -48, 42, -29, 0, -10).fillTriangle(0, -48, -42, -29, 0, -10);
+    roof.fillStyle(roofLight, 0.46).fillTriangle(0, -44, -36, -29, 0, -14);
+    roof.lineStyle(2, roofLight, 0.6).lineBetween(-36, -29, 0, -44).lineBetween(0, -44, 36, -29);
     const art = this.add.graphics();
     art.fillStyle(0x3a2918, 1).fillRect(-46, 15, 92, 19).fillRect(-40, 9, 80, 31);
     art.fillStyle(0x83653c, 1).fillRect(-40, 11, 80, 17).fillRect(-34, 7, 68, 25);
@@ -569,8 +645,13 @@ export class WorldScene extends Phaser.Scene {
     if (building.kind === 'extractor') activity.lineStyle(4, 0xff9a73, 0.7).strokeCircle(0, -8, 22).lineBetween(0, -33, 0, 17).lineBetween(-25, -8, 25, -8);
     if (building.kind === 'clinic') activity.fillStyle(0xffb9da, 0.24).fillCircle(0, -5, 30).fillStyle(0xffffff, 0.8).fillRect(-2, -28, 4, 8);
     const level = crisp(this.add.text(-34, -27, building.level >= 3 ? 'Ⅲ' : building.level >= 2 ? 'Ⅱ' : 'Ⅰ', { fontFamily: DISPLAY_FONT, fontStyle: 'bold', fontSize: '12px', color: '#fff0ba', backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
-    const name = crisp(this.add.text(0, 50, `${buildingDisplayName(building).toUpperCase()}${building.constructing ? ` ${Math.floor(building.constructionProgress)}%` : ''}`, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#fff0ba', backgroundColor: '#382918ee', padding: { x: 7, y: 4 } })).setOrigin(0.5);
-    const container = this.add.container(building.x, building.y, [shadow, halo, art, activity, core, glyph, level, name]).setDepth(7).setSize(120, 104).setInteractive({ useHandCursor: true }).setData('level', building.level);
+    const structure = this.add.container(0, -18, [halo, roof, art, activity, core, glyph, level]);
+    const name = crisp(this.add.text(0, 68, `${buildingDisplayName(building).toUpperCase()}${building.constructing ? ` ${Math.floor(building.constructionProgress)}%` : ''}`, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#fff0ba', backgroundColor: '#382918ee', padding: { x: 7, y: 4 } })).setOrigin(0.5);
+    const container = this.add.container(building.x, building.y, [shadow, plinth, structure, name])
+      .setDepth(dioramaDepth(building.y))
+      .setSize(132, 126)
+      .setInteractive({ useHandCursor: true })
+      .setData('level', building.level);
     container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (pointer.getDistance() < 8 && !this.placementKind) {
         if (this.managementOrderMode) {
@@ -581,7 +662,7 @@ export class WorldScene extends Phaser.Scene {
         this.game.events.emit('building-selected', this.state.buildings.find((candidate) => candidate.id === building.id));
       }
     });
-    return { container, halo, core, activity };
+    return { container, structure, shadow, halo, core, activity };
   }
   private syncState(state: WorldState) {
     this.creaturesById = new Map(state.creatures.map((creature) => [creature.id, creature]));
@@ -601,6 +682,7 @@ export class WorldScene extends Phaser.Scene {
         view.lastTask = creature.task;
       }
       view.lastAlive = creature.alive;
+      if (this.managementDragId !== creature.id) view.container.setDepth(dioramaDepth(creature.y, 0.2));
       this.drawCreature(view, creature);
     });
     state.buildings.forEach((building) => {
@@ -617,6 +699,7 @@ export class WorldScene extends Phaser.Scene {
       const building = state.buildings.find((item) => item.id === id);
       if (building) {
         view.container.setData('signature', `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}:${Math.floor(materialDeliveryRatio(building) * 5)}:${Math.floor(building.durability / 10)}:${building.maintenanceFunded}`);
+        view.container.setDepth(dioramaDepth(building.y));
         view.container.setVisible(state.livingWorld.activeRegion === 'lumen-field');
       }
     });
@@ -635,7 +718,7 @@ export class WorldScene extends Phaser.Scene {
     if (state.livingWorld.activeRegion !== 'lumen-field') return;
     if (overlay === 'none') return;
     const label = (x: number, y: number, value: string, color: number) => {
-      const node = crisp(this.add.text(x, y, value, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: Phaser.Display.Color.IntegerToColor(color).rgba, backgroundColor: '#241b12dd', padding: { x: 5, y: 3 }, align: 'center' })).setOrigin(0.5).setDepth(12);
+      const node = crisp(this.add.text(x, y, value, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: Phaser.Display.Color.IntegerToColor(color).rgba, backgroundColor: '#241b12dd', padding: { x: 5, y: 3 }, align: 'center' })).setOrigin(0.5).setDepth(38);
       this.managementLabels.push(node);
     };
     if (overlay === 'zones') {
@@ -935,6 +1018,12 @@ export class WorldScene extends Phaser.Scene {
     const living = this.state.livingWorld; const dayLight = Math.max(0, Math.sin(living.dayTime * Math.PI)); const night = 1 - dayLight;
     const stormDarkness = living.weather === 'storm' ? 0.16 : living.weather === 'rain' ? 0.07 : 0;
     this.dayOverlay.setFillStyle(living.season === 'frostquiet' ? 0x152949 : living.season === 'amberfall' ? 0x3a1d16 : 0x08152a, Math.min(0.58, night * 0.48 + stormDarkness));
+    this.dioramaLighting.clear();
+    const warmLight = living.season === 'amberfall' ? 0xffbd76 : living.season === 'frostquiet' ? 0xaad8ff : 0xffe2a0;
+    const lightX = living.dayTime < 0.5 ? 90 : WORLD_WIDTH - 90;
+    this.dioramaLighting.fillStyle(warmLight, 0.018 + dayLight * 0.025).fillCircle(lightX, 110, 430);
+    this.dioramaLighting.fillStyle(warmLight, 0.012 + dayLight * 0.014)
+      .fillTriangle(lightX, 40, living.dayTime < 0.5 ? 760 : 840, 900, living.dayTime < 0.5 ? 1120 : 480, 900);
     this.weatherGraphics.clear();
     const sunrise = Math.max(0, 1 - Math.abs(living.dayTime - 0.2) / 0.12); const sunset = Math.max(0, 1 - Math.abs(living.dayTime - 0.8) / 0.12);
     if (sunrise + sunset > 0) this.weatherGraphics.fillStyle(0xffb36a, (sunrise + sunset) * 0.045).fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
@@ -992,7 +1081,18 @@ export class WorldScene extends Phaser.Scene {
         glint.node.alpha = 0.12 + (Math.sin(time * 0.003 + glint.phase) + 1) * (night ? 0.2 : 0.12);
         glint.node.setScale(0.75 + (Math.sin(time * 0.0023 + glint.phase) + 1) * 0.3);
       });
+      this.dioramaScenery.forEach((scenery) => {
+        const sway = Math.sin(time * 0.0009 + scenery.phase) * windStrength;
+        scenery.canopy.rotation = sway;
+        scenery.canopy.x = sway * 8;
+      });
     }
+    const sceneShadowAlpha = dioramaShadowAlpha(this.state.livingWorld.dayTime, this.state.livingWorld.weather);
+    const sceneryShadow = dioramaShadowOffset(this.state.livingWorld.dayTime, 74);
+    this.dioramaScenery.forEach((scenery) => {
+      scenery.container.setDepth(dioramaDepth(scenery.baseY, 0.45));
+      scenery.shadow.setPosition(8 + sceneryShadow.x, 6 + sceneryShadow.y).setAlpha(sceneShadowAlpha * 0.82);
+    });
     if (time - this.lastAtmosphereAt >= budget.atmosphereInterval) { this.lastAtmosphereAt = time; this.updateAtmosphere(time); }
     this.updateAmbientVoices(time);
     if (!this.state.livingWorld.settings.lowPower && time - this.lastFootprintAt > budget.footprintInterval) {
@@ -1008,6 +1108,10 @@ export class WorldScene extends Phaser.Scene {
       const view = this.views.get(creature.id); if (!view) return;
       const dx = creature.x - view.container.x; const dy = creature.y - view.container.y;
       if (this.managementDragId !== creature.id) { view.container.x += dx * smoothing; view.container.y += dy * smoothing; }
+      if (this.managementDragId !== creature.id) {
+        view.container.setDepth(dioramaDepth(view.container.y, 0.2));
+        view.container.setScale(dioramaScaleAtY(view.container.y));
+      }
       const inView = view.container.x > camera.worldView.left - 100 && view.container.x < camera.worldView.right + 100 && view.container.y > camera.worldView.top - 100 && view.container.y < camera.worldView.bottom + 100;
       const regionVisible = this.creatureVisibleInActiveRegion(creature);
       view.container.setVisible(inView && regionVisible);
@@ -1018,7 +1122,7 @@ export class WorldScene extends Phaser.Scene {
       const moving = Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y) > 12 || Math.hypot(dx, dy) > 1;
       const profile = creaturePose(creature, moving); const cycle = Math.sin(time * profile.cadence + phase); const step = moving ? Math.abs(cycle) : cycle * 0.45;
       if (Math.abs(dx) > 0.7) view.facing = dx < 0 ? -1 : 1;
-      view.actor.y = creature.alive ? -Math.max(0, step) * profile.bob * motionScale : 0;
+      view.actor.y = creature.alive ? -8 - Math.max(0, step) * profile.bob * motionScale : -2;
       const targetRotation = creature.alive ? Phaser.Math.Clamp(view.facing * profile.lean * (moving ? cycle : 0.25 * cycle), -0.22, 0.22) : 0;
       view.pose.rotation = Phaser.Math.Linear(view.pose.rotation, targetRotation, Math.min(1, smoothing * 1.4));
       view.pose.scaleX = view.facing * (1 + Math.abs(cycle) * profile.squash * motionScale);
@@ -1030,7 +1134,9 @@ export class WorldScene extends Phaser.Scene {
       view.gesture.alpha = creature.alive ? 0.78 + Math.abs(cycle) * 0.22 : 0;
       const pulse = 1 + Math.sin(time * 0.003 + phase) * 0.055;
       view.aura.setScale(pulse); view.shadow.setScale(1 - (pulse - 1) * 1.5, 1);
-      view.shadow.alpha = 0.4 - Math.max(0, step) * profile.shadowPulse;
+      const creatureShadow = dioramaShadowOffset(this.state.livingWorld.dayTime, 38 + Math.max(0, step) * profile.bob);
+      view.shadow.setPosition(2 + creatureShadow.x, 31 + creatureShadow.y);
+      view.shadow.alpha = Math.max(0.12, sceneShadowAlpha - Math.max(0, step) * profile.shadowPulse);
       view.thought.y = -69 - (Number(creature.id.replace(/\D/g, '')) % 2) * 8 + Math.sin(time * 0.0025 + phase) * 2;
       view.thought.alpha = 0.9 + (Math.sin(time * 0.003 + phase) + 1) * 0.05;
     });
@@ -1039,8 +1145,13 @@ export class WorldScene extends Phaser.Scene {
       const inView = building.x > camera.worldView.left - 140 && building.x < camera.worldView.right + 140 && building.y > camera.worldView.top - 120 && building.y < camera.worldView.bottom + 120;
       const homeVisible = this.state.livingWorld.activeRegion === 'lumen-field';
       view.container.setVisible(homeVisible && inView); if (!homeVisible || !inView) return;
+      view.container.setDepth(dioramaDepth(building.y));
+      view.container.setScale(dioramaScaleAtY(building.y));
       const phase = (Number(building.id.replace(/\D/g, '')) || 1) * 0.83; const frequency = buildingMotionFrequency(building.kind); const cycle = Math.sin(time * frequency + phase);
       const operating = building.active && this.state.creatures.some((creature) => creature.alive && creature.destinationBuildingId === building.id && creature.isBeingServed);
+      const buildingShadow = dioramaShadowOffset(this.state.livingWorld.dayTime, 82);
+      view.shadow.setPosition(7 + buildingShadow.x, 43 + buildingShadow.y).setAlpha(sceneShadowAlpha);
+      view.structure.y = -18 - (operating ? Math.max(0, cycle) * 1.8 : 0);
       view.core.setScale(0.9 + (cycle + 1) * (operating ? 0.16 : 0.07)).setAlpha(operating ? 0.82 + cycle * 0.16 : 0.48 + cycle * 0.14);
       view.halo.setScale(1 + cycle * (operating ? 0.09 : 0.035)).setAlpha(operating ? 0.13 : 0.065);
       view.activity.setVisible(budget.buildingEffects).setAlpha(building.active ? (operating ? 0.82 : 0.38) : 0.16);
