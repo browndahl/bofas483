@@ -21,8 +21,11 @@ export type ExpeditionStatus = 'active' | 'decision' | 'complete';
 export type ExpeditionChoice = 'preserve' | 'salvage';
 export type ManagementPriorityKey = 'medical' | 'food' | 'cleanliness' | 'rest' | 'morale' | 'maintenance' | 'construction' | 'industry';
 export type ColonyPolicyKey = 'emergencyFirst' | 'repairBeforeConstruction' | 'protectReserves' | 'autoStaff';
-export type CreatureSchedule = 'balanced' | 'early' | 'late' | 'flexible';
+export type CreatureSchedule = 'balanced' | 'early' | 'late' | 'flexible' | 'custom';
 export type SchedulePhase = 'rest' | 'free' | 'work';
+export type ColonyOverlay = 'none' | 'zones' | 'capacity' | 'traffic' | 'orders';
+export type ManagementPreset = 'balanced' | 'emergency' | 'growth' | 'relaxed' | 'custom';
+export type DirectOrderKind = 'move' | 'operate' | 'construct' | 'maintain' | 'rest' | 'recreate';
 
 export interface Vec2 { x: number; y: number }
 export interface Needs { hunger: number; hygiene: number; happiness: number; health: number; energy: number }
@@ -81,9 +84,11 @@ export interface CreatureState {
   currentConcern: string;
   expeditionId?: string;
   schedule: CreatureSchedule;
+  customSchedule: SchedulePhase[];
   managementGroupId: string;
   shiftWork: number;
   lastTaskReason: string;
+  directOrder?: { kind: DirectOrderKind; issuedAt: number; expiresAt: number; buildingId?: string; target?: Vec2 };
 }
 export interface BuildingState {
   id: string;
@@ -146,6 +151,10 @@ export interface ColonyManagementState {
   zones: ColonyZone[];
   groups: ColonyGroup[];
   autoFundRepairsBelow: number;
+  overlay: ColonyOverlay;
+  activePreset: ManagementPreset;
+  tutorialStep: number;
+  metrics: Array<{ at: number; glow: number; alloy: number; population: number; queued: number; averageNeed: number }>;
 }
 export interface JobQueueEntry {
   id: string; kind: 'care' | 'construction' | 'maintenance' | 'queue'; priority: number; title: string;
@@ -256,6 +265,7 @@ export function makeCreature(id: string, x: number, y: number, generation = 0, p
     ageMilestone: 0,
     currentConcern: 'Feeling secure',
     schedule: 'balanced',
+    customSchedule: ['rest', 'rest', 'free', 'work', 'work', 'work', 'free', 'rest'],
     managementGroupId: ['gentle-shift', 'maker-shift', 'free-chorus'][index % 3],
     shiftWork: 0,
     lastTaskReason: 'Choosing freely from current needs'
@@ -309,9 +319,13 @@ export function createInitialWorld(seed = Date.now()): WorldState {
           { id: 'maker-shift', name: 'Maker Shift', color: 0xf7bd62, zoneId: 'central-field' },
           { id: 'free-chorus', name: 'Free Chorus', color: 0xbf78ff, zoneId: 'south-meadow' }
         ],
-        autoFundRepairsBelow: 35
+        autoFundRepairsBelow: 35,
+        overlay: 'none',
+        activePreset: 'balanced',
+        tutorialStep: 0,
+        metrics: []
       },
-      saveVersion: 7
+      saveVersion: 8
     }
   };
 }

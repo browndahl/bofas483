@@ -11,6 +11,7 @@ import {
   CREATURE_SCHEDULES,
   MANAGEMENT_LABELS,
   MANAGEMENT_PRIORITY_KEYS,
+  forecastExplanations,
   schedulePhase
 } from '../simulation/colonyManagement';
 import { BUILDINGS } from '../simulation/building';
@@ -21,7 +22,7 @@ import { button, panel } from '../ui/hud';
 import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
 
 type Page = 'OVERVIEW' | 'MANAGE' | 'SOCIAL' | 'EXPLORE' | 'RESEARCH' | 'LUMA' | 'HISTORY' | 'SETTINGS' | 'SAVES' | 'CHANGELOG';
-type ManagementTab = 'POLICIES' | 'ROSTER' | 'JOBS';
+type ManagementTab = 'POLICIES' | 'ROSTER' | 'MAP' | 'JOBS';
 const PAGES: Page[] = ['OVERVIEW', 'MANAGE', 'SOCIAL', 'EXPLORE', 'RESEARCH', 'LUMA', 'HISTORY', 'SETTINGS', 'SAVES', 'CHANGELOG'];
 const ROLES: Array<CreatureRole | 'auto'> = ['auto', 'forager', 'caretaker', 'healer', 'builder', 'researcher', 'explorer'];
 
@@ -142,26 +143,32 @@ export class ColonyScene extends Phaser.Scene {
 
   private renderManagement() {
     const { width } = this.dimensions(); const compact = width < 600; const management = this.state.livingWorld.management;
-    const tabs: ManagementTab[] = ['POLICIES', 'ROSTER', 'JOBS']; const tabWidth = (width - 10) / 3;
+    const tabs: ManagementTab[] = ['POLICIES', 'ROSTER', 'MAP', 'JOBS']; const tabWidth = (width - 15) / 4;
     tabs.forEach((tab, index) => this.addButton(tabWidth / 2 + index * (tabWidth + 5), 4, tabWidth, tab, this.managementTab === tab ? 0xf7bd62 : 0x65c7ff, () => { this.managementTab = tab; this.renderPage(); }));
     if (this.managementTab === 'POLICIES') {
       const forecast = colonyForecast(this.state);
       this.addHeading(0, 50, '30-MINUTE COLONY FORECAST');
       this.addText(0, 76, `FOOD ${forecast.food.capacity}/${forecast.food.demand} ${forecast.food.status.toUpperCase()}  ·  BEDS ${forecast.beds.capacity}/${forecast.beds.demand} ${forecast.beds.status.toUpperCase()}  ·  CLINIC ${forecast.clinics.capacity}/${forecast.clinics.demand} ${forecast.clinics.status.toUpperCase()}\nNET / MIN  ${forecast.resourceNet.glowPerMinute >= 0 ? '+' : ''}${forecast.resourceNet.glowPerMinute.toFixed(1)} GLOW  ·  ${forecast.resourceNet.alloyPerMinute >= 0 ? '+' : ''}${forecast.resourceNet.alloyPerMinute.toFixed(1)} ALLOY  ·  PREFERRED STAFF ${forecast.staffing.assigned}/${forecast.staffing.preferred}`, compact ? 8 : 10, '#dff5ea', width);
-      this.addHeading(0, 126, 'COLONY POLICIES');
+      const warning = forecastExplanations(this.state)[0];
+      this.addText(0, 112, warning, compact ? 7 : 8, warning.startsWith('All') ? '#7af6bd' : '#ffb09f', width);
+      this.addHeading(0, 140, `MANAGEMENT PRESET  /  ${management.activePreset.toUpperCase()}`);
+      const presets = ['balanced', 'emergency', 'growth', 'relaxed'] as const;
+      const presetWidth = (width - 15) / 4;
+      presets.forEach((preset, index) => this.addButton(presetWidth / 2 + index * (presetWidth + 5), 172, presetWidth, preset.toUpperCase(), management.activePreset === preset ? 0xff8fcf : 0xbf78ff, () => gameStore.applyManagementPreset(preset)));
+      this.addHeading(0, 200, 'COLONY POLICIES');
       const policyLabels = { emergencyFirst: 'EMERGENCIES FIRST', repairBeforeConstruction: 'REPAIR BEFORE BUILD', protectReserves: 'PROTECT RESERVES', autoStaff: 'PREFER TRAINED STAFF' };
       COLONY_POLICY_KEYS.forEach((key, index) => {
-        const column = index % 2; const row = Math.floor(index / 2); const x = column * width * 0.5; const y = 163 + row * 43;
+        const column = index % 2; const row = Math.floor(index / 2); const x = column * width * 0.5; const y = 237 + row * 43;
         this.addButton(x + width * 0.23, y, width * 0.44, `${policyLabels[key]} ${management.policies[key] ? 'ON' : 'OFF'}`, management.policies[key] ? 0x7af6bd : 0xff735f, () => gameStore.setColonyPolicy(key, !management.policies[key]));
       });
-      this.addText(0, 245, `PROTECTED RESERVES  ${management.minimumReserves.glow} GLOW / ${management.minimumReserves.alloy} ALLOY\nAutomatic repairs will not spend below this floor.`, compact ? 8 : 10, '#90c9b0', width - 180);
-      this.addButton(width - 74, 260, 145, 'CYCLE RESERVE', 0xbf78ff, () => {
+      this.addText(0, 319, `PROTECTED RESERVES  ${management.minimumReserves.glow} GLOW / ${management.minimumReserves.alloy} ALLOY`, compact ? 8 : 10, '#90c9b0', width - 180);
+      this.addButton(width - 74, 326, 145, 'CYCLE RESERVE', 0xbf78ff, () => {
         const nextGlow = management.minimumReserves.glow >= 60 ? 0 : management.minimumReserves.glow + 12;
         gameStore.setMinimumReserves(nextGlow, Math.round(nextGlow / 2));
       });
-      this.addHeading(0, 300, 'WORK PRIORITIES  /  0 OFF · 3 URGENT');
+      this.addHeading(0, 360, 'WORK PRIORITIES  /  0 OFF · 3 URGENT');
       MANAGEMENT_PRIORITY_KEYS.forEach((key, index) => {
-        const column = index % 2; const row = Math.floor(index / 2); const x = column * width * 0.5; const y = 335 + row * 43;
+        const column = index % 2; const row = Math.floor(index / 2); const x = column * width * 0.5; const y = 395 + row * 37;
         const value = management.priorities[key];
         this.addButton(x + width * 0.23, y, width * 0.44, `${MANAGEMENT_LABELS[key]} ${value}`, value === 3 ? 0xff8fcf : value === 0 ? 0x788b82 : 0xf7bd62, () => gameStore.setManagementPriority(key, ((value + 1) % 4) as 0 | 1 | 2 | 3));
       });
@@ -176,13 +183,63 @@ export class ColonyScene extends Phaser.Scene {
         ? this.rosterFilter === 'all' || Math.min(...Object.values(creature.needs)) < 35
         : creature.assignedRole === this.rosterFilter))
         .sort((a, b) => Math.min(...Object.values(a.needs)) - Math.min(...Object.values(b.needs)) || b.stress - a.stress);
-      this.addText(0, 88, `${living.length} MATCHING · sorted by risk, then stress. Select a row to open the complete identity card.`, compact ? 8 : 10, '#90c9b0', width);
-      living.slice(0, compact ? 8 : 10).forEach((creature, index) => {
-        const y = 125 + index * (compact ? 49 : 45); const group = management.groups.find((candidate) => candidate.id === creature.managementGroupId);
+      const editor = living.find((creature) => creature.id === this.selectedCreatureId) ?? living[0];
+      this.addText(0, 88, `${living.length} MATCHING · PLAN edits the eight 3-hour schedule blocks.`, compact ? 8 : 10, '#90c9b0', width);
+      if (editor) {
+        this.addHeading(0, 116, `${editor.name.toUpperCase()} CUSTOM DAY  /  REST · FREE · WORK`);
+        const blockWidth = (width - 21) / 8;
+        editor.customSchedule.forEach((phase, index) => this.addButton(blockWidth / 2 + index * (blockWidth + 3), 151, blockWidth, `${index * 3}\n${phase.slice(0, 1).toUpperCase()}`, phase === 'work' ? 0xf7bd62 : phase === 'rest' ? 0x65c7ff : 0xbf78ff, () => {
+          gameStore.setCustomScheduleBlock(editor.id, index, phase === 'rest' ? 'free' : phase === 'free' ? 'work' : 'rest');
+        }));
+      }
+      living.slice(0, compact ? 6 : 7).forEach((creature, index) => {
+        const y = 195 + index * (compact ? 53 : 48); const group = management.groups.find((candidate) => candidate.id === creature.managementGroupId);
         const minimum = Math.round(Math.min(...Object.values(creature.needs)));
-        this.addText(0, y, `${creature.name.toUpperCase()}  ·  ${creature.assignedRole.toUpperCase()}  ·  NEED ${minimum}%  ·  STRESS ${Math.round(creature.stress)}%\n${creature.schedule.toUpperCase()} / ${schedulePhase(this.state.livingWorld.dayTime, creature.schedule).toUpperCase()}  ·  ${group?.name.toUpperCase() ?? 'NO CREW'}  ·  ${creature.task.toUpperCase()}`, compact ? 8 : 9, minimum < 30 ? '#ff9b89' : '#dff5ea', width - 118);
-        this.addButton(width - 52, y + 10, 98, 'OPEN', 0x7af6bd, () => { this.selectedCreatureId = creature.id; this.page = 'LUMA'; this.rebuild(); });
+        this.addText(0, y, `${creature.name.toUpperCase()}  ·  ${creature.assignedRole.toUpperCase()}  ·  NEED ${minimum}%  ·  STRESS ${Math.round(creature.stress)}%\n${creature.schedule.toUpperCase()} / ${schedulePhase(this.state.livingWorld.dayTime, creature.schedule, creature.customSchedule).toUpperCase()}  ·  ${group?.name.toUpperCase() ?? 'NO CREW'}  ·  ${creature.directOrder ? `ORDER ${creature.directOrder.kind.toUpperCase()}` : creature.task.toUpperCase()}`, compact ? 8 : 9, minimum < 30 ? '#ff9b89' : '#dff5ea', width - 145);
+        this.addButton(width - 92, y + 9, 72, 'PLAN', 0xbf78ff, () => { this.selectedCreatureId = creature.id; this.renderPage(); });
+        this.addButton(width - 32, y + 9, 52, 'CARD', 0x7af6bd, () => { this.selectedCreatureId = creature.id; this.page = 'LUMA'; this.rebuild(); });
       });
+      return;
+    }
+    if (this.managementTab === 'MAP') {
+      this.addHeading(0, 54, `MAP OVERLAY  /  ${management.overlay.toUpperCase()}`);
+      const overlays = ['none', 'zones', 'capacity', 'traffic', 'orders'] as const; const overlayWidth = (width - 20) / 5;
+      overlays.forEach((overlay, index) => this.addButton(overlayWidth / 2 + index * (overlayWidth + 5), 88, overlayWidth, overlay.toUpperCase(), management.overlay === overlay ? 0xff8fcf : 0x65c7ff, () => gameStore.setManagementOverlay(overlay)));
+      this.addText(0, 116, 'On the habitat: select a Luma, choose an order, then click ground or a facility. In ORDERS view, drag a Luma onto a facility to make it preferred staff.', compact ? 8 : 10, '#dff5ea', width);
+      this.addHeading(0, 160, 'EDIT CREW ZONES');
+      management.zones.forEach((zone, index) => {
+        const y = 192 + index * 52;
+        this.addText(0, y, `${zone.name.toUpperCase()}  ·  ${zone.kind.toUpperCase()}  ·  R${Math.round(zone.radius)}\nCENTER ${Math.round(zone.x)},${Math.round(zone.y)}`, compact ? 8 : 9, Phaser.Display.Color.IntegerToColor(zone.color).rgba);
+        this.addButton(width - 210, y + 10, 90, 'SHIFT ↗', zone.color, () => gameStore.adjustZone(zone.id, { x: zone.x >= 1200 ? 360 : zone.x + 120, y: zone.y >= 760 ? 220 : zone.y + 70 }));
+        this.addButton(width - 105, y + 10, 110, `RADIUS ${zone.radius >= 340 ? '−' : '+'}`, zone.color, () => gameStore.adjustZone(zone.id, { radius: zone.radius >= 340 ? 150 : zone.radius + 45 }));
+      });
+      const graphY = 365; const graphHeight = 130; const samples = management.metrics;
+      this.addHeading(0, graphY - 26, `COLONY TREND  /  ${samples.length} SAMPLES`);
+      const graph = this.add.graphics(); this.content?.add(graph);
+      graph.lineStyle(1, 0x7b8d7f, 0.45).strokeRect(0, graphY, width, graphHeight);
+      if (samples.length > 1) {
+        const maxResource = Math.max(1, ...samples.flatMap((sample) => [sample.glow, sample.alloy]));
+        const drawSeries = (values: number[], color: number, maximum: number) => {
+          graph.lineStyle(3, color, 0.9); graph.beginPath();
+          values.forEach((value, index) => {
+            const x = index / (values.length - 1) * width; const y = graphY + graphHeight - value / maximum * (graphHeight - 8) - 4;
+            if (!index) graph.moveTo(x, y); else graph.lineTo(x, y);
+          });
+          graph.strokePath();
+        };
+        drawSeries(samples.map((sample) => sample.glow), 0xf7bd62, maxResource);
+        drawSeries(samples.map((sample) => sample.alloy), 0x65c7ff, maxResource);
+        drawSeries(samples.map((sample) => sample.averageNeed), 0x7af6bd, 100);
+        drawSeries(samples.map((sample) => sample.queued * 10), 0xff8fcf, 100);
+      }
+      const lessons = [
+        'STEP 1: Turn on ZONES to see where each crew spends free time.',
+        'STEP 2: Apply a colony preset, then customize individual priorities.',
+        'STEP 3: Adjust a crew zone center or radius.',
+        'STEP 4: Select a Luma, press R, and give a direct order on the map.',
+        'MANAGEMENT TUTORIAL COMPLETE: forecasts and graphs now support your own strategy.'
+      ];
+      this.addText(0, graphY + graphHeight + 8, `GLOW amber · ALLOY blue · WELLBEING green · QUEUES pink\nGUIDED MANAGEMENT ${Math.min(4, management.tutorialStep)}/4 · ${lessons[Math.min(4, management.tutorialStep)]}\nTIP: O cycles overlays. R cycles direct orders. ESC clears an armed order.`, compact ? 7 : 9, management.tutorialStep >= 4 ? '#7af6bd' : '#90c9b0', width);
       return;
     }
     const queue = colonyJobQueue(this.state); const forecast = colonyForecast(this.state);
@@ -359,7 +416,7 @@ export class ColonyScene extends Phaser.Scene {
     this.addHeading(roleX, roleY, 'ROLE & WORK');
     const roleIndex = ROLES.indexOf(creature.autoRole ? 'auto' : creature.assignedRole);
     const group = this.state.livingWorld.management.groups.find((candidate) => candidate.id === creature.managementGroupId);
-    this.addText(roleX, roleY + 27, `Preferred: ${ROLE_LABELS[creature.role]}  ·  Stress: ${Math.round(creature.stress)}%\n${creature.schedule.toUpperCase()} SCHEDULE · ${schedulePhase(this.state.livingWorld.dayTime, creature.schedule).toUpperCase()} NOW · ${group?.name.toUpperCase() ?? 'NO CREW'}`, compact ? 8 : 10, creature.stress > 50 ? '#ff9b89' : '#90c9b0');
+    this.addText(roleX, roleY + 27, `Preferred: ${ROLE_LABELS[creature.role]}  ·  Stress: ${Math.round(creature.stress)}%\n${creature.schedule.toUpperCase()} SCHEDULE · ${schedulePhase(this.state.livingWorld.dayTime, creature.schedule, creature.customSchedule).toUpperCase()} NOW · ${group?.name.toUpperCase() ?? 'NO CREW'}`, compact ? 8 : 10, creature.stress > 50 ? '#ff9b89' : '#90c9b0');
     this.addButton(compact ? width - 80 : width - 92, roleY + 40, compact ? 150 : 170, `ASSIGN ${ROLES[(roleIndex + 1) % ROLES.length] === 'auto' ? 'AUTONOMY' : ROLE_LABELS[ROLES[(roleIndex + 1) % ROLES.length] as CreatureRole]}`, 0x7af6bd, () => gameStore.assignRole(creature.id, ROLES[(roleIndex + 1) % ROLES.length]));
     const scheduleIndex = CREATURE_SCHEDULES.indexOf(creature.schedule);
     const groupIndex = Math.max(0, this.state.livingWorld.management.groups.findIndex((candidate) => candidate.id === creature.managementGroupId));
@@ -430,7 +487,7 @@ export class ColonyScene extends Phaser.Scene {
     this.addButton(right, sectionY + 240, controlWidth, `SPEED ${settings.simulationSpeed}×`, 0x7af6bd, () => gameStore.cycleSpeed());
     this.addButton(width * 0.27, sectionY + 278, compact ? 164 : 190, `ALERTS ${settings.alertLevel.toUpperCase()}`, 0x65c7ff, () => gameStore.updateSetting('alertLevel', settings.alertLevel === 'all' ? 'important' : settings.alertLevel === 'important' ? 'critical' : 'all'));
     this.addButton(width * 0.73, sectionY + 278, compact ? 164 : 190, 'FULLSCREEN', 0xff8fcf, () => this.scale.isFullscreen ? this.scale.stopFullscreen() : this.scale.startFullscreen());
-    this.addText(0, sectionY + 310, 'KEYS  SPACE pause  ·  1/2/3 speed  ·  P photo  ·  G guide  ·  ESC close', compact ? 8 : 10, '#90c9b0', width);
+    this.addText(0, sectionY + 310, 'KEYS  SPACE pause · 1/2/3 speed · O overlay · R order · X clear · P photo · G guide · ESC close', compact ? 8 : 10, '#90c9b0', width);
   }
 
   private renderSaves() {
@@ -464,8 +521,8 @@ export class ColonyScene extends Phaser.Scene {
 
   private renderChangelog() {
     const { width } = this.dimensions();
-    this.addHeading(0, 0, 'ADVANCED COLONY MANAGEMENT  /  2026.07');
-    this.addText(0, 30, 'POLICIES & PRIORITIES\nA new MANAGE workspace controls medical care, food, cleanliness, rest, morale, repairs, construction, and industry. Emergency care can override routine work, repairs can take precedence over expansion, and protected resource reserves prevent automation from spending the colony into danger.\n\nSCHEDULES & SAFE SHIFTS\nEvery Luma now follows a Balanced, Early, Late, or Flexible schedule with visible work, free-time, and rest phases. Protected recovery blocks and a maximum continuous shift prevent silent overwork. The Luma identity card explains the exact policy, need, or schedule behind its current action.\n\nCREWS & ZONES\nThree persistent crews organize idle movement around North Grove, Central Field, and South Meadow. Zones create a readable colony rhythm while urgent needs and required jobs remain free to cross boundaries.\n\nFORECASTS & JOB QUEUE\nFood, bed, and clinic forecasts expose capacity pressure early. A live job queue combines critical care, construction, repairs, and facility congestion, including plain-language reasons when work is delayed or blocked.\n\nPREFERRED STAFFING\nEvery facility can prefer a named operator. Preferred staff receive first claim when available, while automatic staffing remains the safe fallback. Assignments, schedules, crews, priorities, policies, and reserves all persist through old-save migration and offline simulation.\n\nPERFORMANCE SAFETY\nManagement decisions stay in the worker simulation and reuse existing capacity, navigation, and reservation systems. Automated tests cover migration, reserve protection, schedules, emergency overrides, preferred staffing, zone behavior, and large-colony compatibility.', 12, '#e4f7ed', width);
+    this.addHeading(0, 0, 'MANAGEMENT 2.0 / MAP CONTROL  /  2026.07');
+    this.addText(0, 30, 'LIVE MAP OVERLAYS\nZones reveal crew territory. Capacity shows every facility’s influence, service stations, queue, and durability. Traffic exposes active navigation paths, congestion heat, selected-task reasoning, and blocked-route causes. Orders show direct assignments and their destinations.\n\nDIRECT COMMAND\nSelect a Luma and issue MOVE, OPERATE, CONSTRUCT, MAINTAIN, REST, or RECREATE orders directly on the habitat. Emergency needs retain safety priority. Orders expire safely, can be cleared instantly, and preserve autonomous behavior afterward.\n\nDRAG STAFFING & EDITABLE ZONES\nIn Orders view, drag a Luma onto an active facility to assign preferred staffing. Crew zone centers and radii can be adjusted from the Map workspace without restricting urgent care or required work.\n\nCUSTOM DAYS & PRESETS\nEvery Luma can use an eight-block custom day made from Rest, Free, and Work periods. Colony-wide Balanced, Emergency, Growth, and Relaxed presets provide fast strategic changes while individual policy edits create a Custom plan.\n\nFORECASTS & HISTORY GRAPHS\nWarnings now state the numerical cause and likely fix. Rolling graphs track GLOW, ALLOY, average wellbeing, and queue pressure across the latest simulation samples.\n\nGUIDED MANAGEMENT\nA four-step contextual lesson introduces overlays, presets, zone editing, and direct orders. The complete system migrates existing saves to version 8 and remains bounded for large colonies.', 12, '#e4f7ed', width);
   }
 
   private shutdown() { this.unsubscribe?.(); this.unsubscribe = undefined; this.scale.off('resize', this.rebuild, this); this.input.keyboard?.removeAllListeners(); }

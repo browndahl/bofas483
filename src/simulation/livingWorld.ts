@@ -63,7 +63,7 @@ export function createLivingWorld(): LivingWorldState {
     },
     telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 },
     management: createColonyManagement(),
-    saveVersion: 7
+    saveVersion: 8
   };
 }
 
@@ -92,7 +92,7 @@ export function ensureLivingWorld(world: WorldState) {
     world.livingWorld.settings.textScale = Math.max(1.1, world.livingWorld.settings.textScale);
   }
   ensureColonyManagement(world);
-  world.livingWorld.saveVersion = 7;
+  world.livingWorld.saveVersion = 8;
 }
 
 export function addJournal(world: WorldState, entry: Omit<JournalEntry, 'id' | 'at'> & { id?: string; at?: number }) {
@@ -241,6 +241,15 @@ export function updateLivingWorld(world: WorldState, seconds: number) {
   world.livingWorld.unlockedRegions = regionNames.slice(0, world.livingWorld.level);
   world.livingWorld.title = TITLES[world.livingWorld.level - 1];
   world.livingWorld.telemetry.creatures = living.length;
+  const metrics = world.livingWorld.management.metrics;
+  if (!metrics.length || world.time - metrics[metrics.length - 1].at >= 10) {
+    const queued = living.filter((creature) => creature.destinationBuildingId && !creature.isBeingServed).length;
+    const averageNeed = living.length
+      ? living.reduce((sum, creature) => sum + Object.values(creature.needs).reduce((needSum, value) => needSum + value, 0) / 5, 0) / living.length
+      : 0;
+    metrics.push({ at: world.time, glow: world.resources.glow, alloy: world.resources.alloy, population: living.length, queued, averageNeed });
+    if (metrics.length > 48) metrics.splice(0, metrics.length - 48);
+  }
   [3, 6, 10, 25, 50, 100, 250].forEach((population) => {
     const id = `population-${population}`;
     if (living.length >= population && !world.livingWorld.journal.some((entry) => entry.id === id)) {
