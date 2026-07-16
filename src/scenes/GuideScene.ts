@@ -7,7 +7,7 @@ import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
 const PAGES = [
   {
     title: 'START HERE',
-    body: 'YOUR PURPOSE\nKeep the Luma alive while their colony grows. Their needs fall continuously—even while you are watching other screens in the game.\n\nLIVING INDIVIDUALS\nEvery Luma has a persistent personality, role, six trainable skills, favorite activity, favorite facility, friendships, and a personal ambition. Practice raises skill levels and makes facility work more effective.\n\nTHE CORE LOOP\n1. Click a Luma to hear its original voice and inspect its life.\n2. Use FEED, WASH, and PLAY for immediate care.\n3. Build facilities so the colony can care for itself.\n4. Upgrade facilities for stronger effects and more service stations.\n5. Keep needs high to enable division and grow the population.\n6. Your choices shape the hidden humanity audit.\n\nRESOURCES\nGLOW pays for construction. ALLOY unlocks advanced automation. The Deep Taker produces both, but pollutes.'
+    body: 'YOUR PURPOSE\nKeep the Luma alive while their colony grows. The guided journey at the top of the habitat teaches each major system in a safe order. Click it at any time for contextual help.\n\nLIVING INDIVIDUALS\nEvery Luma has a persistent personality, role, six trainable skills, favorite activity, favorite facility, friendships, and a personal ambition. Practice raises skill levels and makes facility work more effective.\n\nTHE CORE LOOP\n1. Click a Luma to hear its original voice and inspect its life.\n2. Use FEED, WASH, and PLAY for immediate care.\n3. Build facilities so the colony can care for itself.\n4. Assign roles, research discoveries, and upgrade facilities.\n5. Keep needs high to enable division and grow the population.\n6. Earn reputation, habitat levels, regions, and a final Audit decision.\n\nRESOURCES\nGLOW pays for construction. ALLOY unlocks advanced automation. Research Points unlock colony-wide bonuses. Guided steps grant useful supplies and reputation.'
   },
   {
     title: 'LUMA NEEDS',
@@ -23,7 +23,7 @@ const PAGES = [
   },
   {
     title: 'CONTROLS & SIGNALS',
-    body: 'SELECT & LISTEN\nClick or tap a Luma to make it the active care target. It answers with an original mood-based voice and speech bubble. Happy, curious, hungry, tired, lonely, and unwell Luma all sound different.\n\nINSPECT\nClick a facility to see its current effect, service capacity, live occupants, queue, upgrade name, cost, and benefit. Click a Luma to return to its needs, role, skills, preferences, bonds, and ambition.\n\nMOVE THE HABITAT\nDrag empty ground to pan. Use the mouse wheel or pinch to zoom. Luma route around structures, water, stone, and each other. Facilities reserve separate service stations; extra visitors wait in numbered queues and spread between available facilities.\n\nPRIORITIES\nFood, hygiene, sleep, and medical emergencies interrupt social plans. Blocked plans repath or time out safely.\n\nSTATUS SIGNALS\n! hungry   ≋ dirty   z tired   · unhappy   ☣ sick   ♡ social   + comforting\nSILENT means the Luma has died and cannot be restored.\n\nBUILD SAFETY\nPress U within 30 seconds to undo unfinished construction and recover 80% of materials.\n\nSAVE & OFFLINE LIFE\nProgress saves locally every 15 seconds. When you return after 45+ seconds, up to your configured safe limit is simulated and summarized. Offline safety prevents exhaustion from causing permanent silence.'
+    body: 'SELECT & LISTEN\nClick or tap a Luma to make it the active care target. It answers with an original mood-based voice and speech bubble. Happy, curious, hungry, tired, lonely, and unwell Luma all sound different.\n\nINSPECT\nClick a facility to see its current effect, service capacity, live occupants, queue, upgrade name, cost, and benefit. Click a Luma to return to its needs, role, skills, preferences, bonds, and ambition.\n\nMOVE THE HABITAT\nDrag empty ground to pan. Use the mouse wheel or pinch to zoom. Luma route around structures, water, stone, and each other. Facilities reserve separate service stations; extra visitors wait in numbered queues and spread between available facilities.\n\nPRIORITIES\nFood, hygiene, sleep, and medical emergencies interrupt social plans. Blocked plans repath or time out safely.\n\nSTATUS SIGNALS\n! hungry   ≋ dirty   z tired   · unhappy   ☣ sick   ♡ social   + comforting\nSILENT means a Luma has died. If every voice falls silent, Recovery Options let one Luma answer an emergency signal without erasing buildings, research, or history. Starting a new colony always requires confirmation.\n\nBUILD SAFETY\nPress U within 30 seconds to undo unfinished construction and recover 80% of materials.\n\nSAVE & OFFLINE LIFE\nProgress saves locally every 15 seconds. When you return after 45+ seconds, up to your configured safe limit is simulated and summarized. Offline safety prevents exhaustion from causing permanent silence.'
   },
   {
     title: 'ROLES & RESEARCH',
@@ -43,6 +43,10 @@ export class GuideScene extends Phaser.Scene {
   private searchResult?: { title: string; body: string };
 
   constructor() { super('GuideScene'); }
+
+  init(data: { page?: number }) {
+    if (Number.isInteger(data.page)) this.page = Phaser.Math.Clamp(data.page ?? 0, 0, PAGES.length - 1);
+  }
 
   create() {
     this.buildLayout();

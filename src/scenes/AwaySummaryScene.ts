@@ -50,7 +50,8 @@ export class AwaySummaryScene extends Phaser.Scene {
         : `All ${this.summary.livingAtEnd} living Luma remained stable during offline simulation.`;
     crisp(this.add.text(width / 2, height / 2 + cardHeight / 2 - 86, safety, { fontFamily: UI_FONT, fontSize: '10px', color: '#8eb4a2', align: 'center', wordWrap: { width: cardWidth - 52 } })).setOrigin(0.5).setDepth(303);
     if (this.summary.importantEvents.length) crisp(this.add.text(width / 2, height / 2 + cardHeight / 2 - 112, this.summary.importantEvents.join('  ·  '), { fontFamily: UI_FONT, fontSize: '9px', color: '#f7bd62', align: 'center', wordWrap: { width: cardWidth - 54 } })).setOrigin(0.5).setDepth(303);
-    const resume = button(this, width / 2, height / 2 + cardHeight / 2 - 38, Math.min(220, cardWidth - 60), 42, 'RETURN TO HABITAT', 0x7af6bd).setDepth(304);
-    resume.on('pointerup', () => this.scene.stop());
+    const needsRecovery = this.summary.livingAtEnd === 0;
+    const resume = button(this, width / 2, height / 2 + cardHeight / 2 - 38, Math.min(260, cardWidth - 60), 42, needsRecovery ? 'OPEN RECOVERY OPTIONS' : 'RETURN TO HABITAT', needsRecovery ? 0xff8fcf : 0x7af6bd).setDepth(304);
+    resume.on('pointerup', () => { this.scene.stop(); if (needsRecovery && !this.scene.isActive('RecoveryScene')) this.scene.launch('RecoveryScene'); });
   };
 }

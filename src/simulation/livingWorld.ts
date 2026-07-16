@@ -159,7 +159,7 @@ export function updateLivingWorld(world: WorldState, seconds: number) {
     addJournal(world, { category: 'weather', title: `${world.livingWorld.weather.toUpperCase()} crosses the field`, detail: `The ${world.livingWorld.season} habitat adjusts its rhythm.` });
   }
   if (averageWellbeing >= 65) world.livingWorld.reputation += seconds * living.length * 0.003;
-  world.livingWorld.researchPoints += seconds * living.filter((creature) => creature.needs.health > 55 && creature.needs.happiness > 45).length * 0.007;
+  world.livingWorld.researchPoints += seconds * living.filter((creature) => creature.needs.health > 55 && creature.needs.happiness > 45).length * 0.03;
   const level = Math.min(5, 1 + Math.floor(world.livingWorld.reputation / 45));
   if (level > world.livingWorld.level) {
     world.livingWorld.level = level; world.resources.glow += level * 20; world.livingWorld.title = TITLES[level - 1];

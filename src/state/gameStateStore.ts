@@ -1,5 +1,6 @@
 import { BUILDINGS, canAfford, canAffordUpgrade, createBuilding, upgradeCost, validateBuildingPlacement } from '../simulation/building';
 import { addJournal, RESEARCH_BRANCHES } from '../simulation/livingWorld';
+import { recoverSilentColony } from '../simulation/recovery';
 import type { BuildingKind, CreatureRole, CreatureState, GameSettings, NeedKey, ResearchBranch, WorldState } from '../simulation/worldState';
 import { appendWorldEvent, createInitialWorld } from '../simulation/worldState';
 
@@ -25,6 +26,12 @@ class GameStateStore {
   }
   stop() { this.worker?.postMessage({ type: 'stop' }); this.worker?.terminate(); this.worker = undefined; }
   reset() { this.set(createInitialWorld()); }
+  recoverColony() {
+    const recovered = recoverSilentColony(this.state);
+    if (!recovered) return undefined;
+    this.set(recovered.state);
+    return recovered.creatureId;
+  }
   selectCreature(id: string): CreatureState | undefined { return this.state.creatures.find((c) => c.id === id); }
   care(id: string, need: Extract<NeedKey, 'hunger' | 'hygiene' | 'happiness'>) {
     const next = structuredClone(this.state);

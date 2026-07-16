@@ -12,6 +12,7 @@ import { AuthScene } from './scenes/AuthScene';
 import { GuideScene } from './scenes/GuideScene';
 import { AwaySummaryScene } from './scenes/AwaySummaryScene';
 import { ColonyScene } from './scenes/ColonyScene';
+import { RecoveryScene } from './scenes/RecoveryScene';
 import { gameStore } from './state/gameStateStore';
 import { saveService } from './services/saveService';
 import './style.css';
@@ -39,7 +40,7 @@ const game = new Phaser.Game({
   fps: { target: 60, min: 30, smoothStep: true },
   input: { activePointers: 3 },
   dom: { createContainer: true },
-  scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene, GuideScene, AwaySummaryScene, ColonyScene]
+  scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene, GuideScene, AwaySummaryScene, ColonyScene, RecoveryScene]
 });
 
 const restored = saveService.loadLocalWithProgress();

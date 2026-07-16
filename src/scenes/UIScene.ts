@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
-import objectives from '../data/objectives.json';
 import { BUILDINGS, buildingCapacity, buildingDisplayName, canAffordUpgrade, upgradeCost, upgradeDescription } from '../simulation/building';
 import { ACTIVITY_LABELS, ROLE_LABELS, SKILL_KEYS, SKILL_LABELS, skillLevel } from '../simulation/colonyLife';
 import { personalityLabels } from '../simulation/personality';
 import { relationshipStage } from '../simulation/livingWorld';
+import { OBJECTIVES } from '../simulation/progression';
 import type { BuildingState, CreatureState, WorldState } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
 import { saveService } from '../services/saveService';
@@ -49,6 +49,7 @@ export class UIScene extends Phaser.Scene {
   private observedDeaths = 0;
   private observedObjectives = 0;
   private observedTime = 0;
+  private recoveryTimer?: Phaser.Time.TimerEvent;
 
   constructor() { super('UIScene'); }
   create() {
@@ -76,6 +77,7 @@ export class UIScene extends Phaser.Scene {
     this.resourcesText = crisp(this.add.text(0, 15, '', { fontFamily: CODE_FONT, fontStyle: 'bold', fontSize: '13px', color: '#fff2bc' })).setOrigin(1, 0).setDepth(101);
     this.populationText = crisp(this.add.text(0, 35, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#d6c59b' })).setOrigin(1, 0).setDepth(101);
     this.objectiveText = crisp(this.add.text(0, 0, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '12px', color: '#fff7d5', backgroundColor: '#3a2e1ff2', padding: { x: 14, y: 10 }, wordWrap: { width: 330 }, lineSpacing: 4 })).setDepth(101).setStroke('#1f180f', 1);
+    this.objectiveText.setInteractive({ useHandCursor: true }).on('pointerup', () => this.openObjectiveGuide());
 
     this.creaturePanel = this.add.container(0, 0).setDepth(110);
     this.creaturePanel.add(panel(this, 0, 0, 330, 420));
@@ -144,7 +146,7 @@ export class UIScene extends Phaser.Scene {
     (this.children.getByName('guide-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? this.scale.width - 64 : width - 582, portrait ? 140 : height - 40);
     (this.children.getByName('colony-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? 64 : width - 704, portrait ? 92 : height - 40);
     (this.children.getByName('speed-button') as Phaser.GameObjects.Container | null)?.setPosition(width - 70, portrait ? 184 : 88);
-    if (this.buildMenu) { this.buildMenu.setPosition(width / 2, height / 2); }
+    if (this.buildMenu) { this.buildMenu.destroy(true); this.buildMenu = undefined; }
   };
   private updateState(state: WorldState) {
     if (state.time < this.observedTime) {
@@ -157,7 +159,8 @@ export class UIScene extends Phaser.Scene {
     this.topPanel.setFillStyle(state.livingWorld.settings.highContrast ? 0x07100d : 0x2c281c, state.livingWorld.settings.highContrast ? 1 : 0.92);
     const living = state.creatures.filter((c) => c.alive);
     this.resourcesText.setText(`GLOW ${Math.floor(state.resources.glow)}   ·   ALLOY ${Math.floor(state.resources.alloy)}`);
-    this.populationText.setText(`LIVING ${living.length}  /  SILENT ${state.deaths}  /  ${Math.floor(state.time)}s`);
+    const silent = state.creatures.filter((creature) => !creature.alive).length;
+    this.populationText.setText(`LIVING ${living.length}  /  SILENT ${silent}  /  ${Math.floor(state.time)}s`);
     const activeAlerts = state.livingWorld.alerts.filter((alert) => !alert.dismissed).length;
     const speedButton = this.children.getByName('speed-button') as Phaser.GameObjects.Container | null;
     (speedButton?.getByName('button-label') as Phaser.GameObjects.Text | null)?.setText(`${state.livingWorld.settings.paused ? 'PAUSED' : `RUN ${state.livingWorld.settings.simulationSpeed}×`}${activeAlerts ? `  !${activeAlerts}` : ''}`);
@@ -170,13 +173,20 @@ export class UIScene extends Phaser.Scene {
       if (building) this.renderBuilding(building); else this.showCreaturePanel();
     }
     this.updateObjective(state);
+    this.queueRecoveryIfNeeded(living.length);
     if (state.completedObjectives.length > this.observedObjectives) {
       const completedIds = state.completedObjectives.slice(this.observedObjectives);
-      const completed = completedIds.map((id) => objectives.find((objective) => objective.id === id)).filter((objective) => objective !== undefined);
+      const completed = completedIds.map((id) => OBJECTIVES.find((objective) => objective.id === id)).filter((objective) => objective !== undefined);
       if (completed.length) {
         const reward = completed.reduce((sum, objective) => sum + objective.reward, 0);
-        this.showToast(completed.length === 1 ? `Objective complete · +${reward} GLOW` : `${completed.length} objectives complete · +${reward} GLOW`);
+        const alloy = completed.reduce((sum, objective) => sum + (objective.alloyReward ?? 0), 0);
+        const research = completed.reduce((sum, objective) => sum + (objective.researchReward ?? 0), 0);
+        const extras = [alloy ? `+${alloy} ALLOY` : '', research ? `+${research} RP` : ''].filter(Boolean).join(' · ');
+        const optionalOnly = completed.every((objective) => objective.optional);
+        this.showToast(optionalOnly ? 'Optional colony memory recorded' : `${completed.length === 1 ? 'Guided step complete' : `${completed.length} guided steps complete`} · +${reward} GLOW${extras ? ` · ${extras}` : ''}`);
         this.game.events.emit('glitch', 0.18);
+        const next = OBJECTIVES.filter((objective) => !objective.optional).find((objective) => !state.completedObjectives.includes(objective.id));
+        if (!optionalOnly && state.livingWorld.settings.tutorial && next) this.time.delayedCall(2300, () => this.showToast(`NEXT · ${next.hint}`));
       }
       this.observedObjectives = state.completedObjectives.length;
     }
@@ -236,8 +246,28 @@ export class UIScene extends Phaser.Scene {
     }
   }
   private updateObjective(state: WorldState) {
-    const current = objectives.find((objective) => !state.completedObjectives.includes(objective.id));
-    this.objectiveText.setText(current ? `OBJECTIVE / ${current.title.toUpperCase()}\n${current.hint}` : 'OBJECTIVES COMPLETE / THE HABITAT REMEMBERS');
+    const guided = OBJECTIVES.filter((objective) => !objective.optional);
+    const completed = guided.filter((objective) => state.completedObjectives.includes(objective.id)).length;
+    const current = guided.find((objective) => !state.completedObjectives.includes(objective.id));
+    if (!current) { this.objectiveText.setText('GUIDED JOURNEY COMPLETE / THE HABITAT REMEMBERS'); return; }
+    const rewards = [`+${current.reward} GLOW`, current.alloyReward ? `+${current.alloyReward} ALLOY` : '', current.researchReward ? `+${current.researchReward} RP` : ''].filter(Boolean).join(' · ');
+    this.objectiveText.setText(`GUIDED STEP ${completed + 1} / ${guided.length}  ·  ${current.title.toUpperCase()}\n${current.hint}\nREWARD ${rewards}  ·  CLICK FOR HELP`);
+  }
+  private openObjectiveGuide() {
+    const current = OBJECTIVES.filter((objective) => !objective.optional).find((objective) => !this.state.completedObjectives.includes(objective.id));
+    const roleOrResearch = current && ['assign-role', 'first-research'].includes(current.id);
+    const building = current && ['place-food', 'complete-food', 'place-wash', 'first-upgrade', 'complete-upgrade', 'place-play', 'industry'].includes(current.id);
+    this.scene.launch('GuideScene', { page: roleOrResearch ? 4 : building ? 2 : 0 });
+  }
+  private queueRecoveryIfNeeded(living: number) {
+    if (living > 0) { this.recoveryTimer?.remove(false); this.recoveryTimer = undefined; return; }
+    if (this.scene.isActive('RecoveryScene') || this.recoveryTimer) return;
+    this.recoveryTimer = this.time.delayedCall(1200, () => {
+      this.recoveryTimer = undefined;
+      if (gameStore.get().creatures.some((creature) => creature.alive) || this.scene.isActive('RecoveryScene')) return;
+      if (this.scene.isActive('AwaySummaryScene')) { this.queueRecoveryIfNeeded(0); return; }
+      this.scene.launch('RecoveryScene');
+    });
   }
   private showCreaturePanel() { this.selectedBuildingId = undefined; this.buildingPanel.setVisible(false); this.creaturePanel.setVisible(true); }
   private selectCreature = (creature?: CreatureState) => { if (creature) { this.showCreaturePanel(); this.selected = creature; this.renderCreature(creature); } };
@@ -280,5 +310,6 @@ export class UIScene extends Phaser.Scene {
     this.scale.off('resize', this.layout, this);
     this.buildMenu?.destroy(true); this.buildMenu = undefined;
     this.toast?.destroy(); this.toast = undefined;
+    this.recoveryTimer?.remove(false); this.recoveryTimer = undefined;
   }
 }

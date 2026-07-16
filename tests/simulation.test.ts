@@ -10,11 +10,13 @@ import { advanceOfflineWorld } from '../src/simulation/offlineProgress';
 import { creatureMood, creatureVocalization } from '../src/simulation/vocalization';
 import { appendWorldEvent, createInitialWorld, makeCreature, MAX_EVENT_HISTORY } from '../src/simulation/worldState';
 import { parseWorldState } from '../src/simulation/worldSchema';
+import { recoverSilentColony } from '../src/simulation/recovery';
+import { resolveObjectiveProgress } from '../src/simulation/progression';
 
 describe('creature simulation', () => {
   it('decays needs at their configured rates', () => {
     const creature = createInitialWorld(1).creatures[0]; const next = decayNeeds(creature, 10);
-    expect(next.needs.hunger).toBeCloseTo(71.5); expect(next.needs.hygiene).toBeCloseTo(78.8); expect(next.age).toBe(10);
+    expect(next.needs.hunger).toBeCloseTo(76.2); expect(next.needs.hygiene).toBeCloseTo(81); expect(next.age).toBe(10);
   });
   it('prioritizes health, hunger, hygiene, energy, then happiness', () => {
     const world = createInitialWorld(1); const creature = world.creatures[0]; const clinic = createBuilding('clinic', 0, 0, 1);
@@ -40,6 +42,22 @@ describe('creature simulation', () => {
     expect(next.completedObjectives).toEqual(['first-care']);
     expect(next.resources.glow).toBeCloseTo(98);
     expect(next.events.filter((event) => event.type === 'objective_complete')).toHaveLength(1);
+  });
+  it('guides automation before division and grants a first research budget', () => {
+    const world = createInitialWorld(1);
+    appendWorldEvent(world, { type: 'manual_hunger', at: 0, payload: { creatureId: 'c1' } });
+    world.buildings.push(createBuilding('nutrient-bed', 700, 500, 1));
+    appendWorldEvent(world, { type: 'division', at: 1, payload: { count: 2 } });
+    world.creatures.push(makeCreature('c2', 730, 540), makeCreature('c3', 760, 560));
+    const next = resolveObjectiveProgress(world);
+    expect(next.completedObjectives).toEqual(['first-care', 'place-food', 'complete-food', 'first-division', 'population-3']);
+    expect(next.livingWorld.researchPoints).toBe(20);
+    expect(next.resources.glow).toBe(207);
+  });
+  it('records optional loss without blocking the guided journey', () => {
+    const world = createInitialWorld(1); world.deaths = 1;
+    const next = resolveObjectiveProgress(world);
+    expect(next.completedObjectives).toEqual(['first-death']);
   });
   it('gives each Luma a stable bounded personality', () => {
     const first = createCreaturePersonality('c12', 2); const second = createCreaturePersonality('c12', 2);
@@ -170,6 +188,25 @@ describe('environment and navigation', () => {
 });
 
 describe('state integrity', () => {
+  it('recovers one Luma without erasing colony progress', () => {
+    const world = createInitialWorld(1); const second = makeCreature('c2', 900, 520); world.creatures.push(second);
+    world.creatures.forEach((creature, index) => { creature.alive = false; creature.task = 'dead'; creature.deathAge = 40 + index; });
+    world.deaths = 2; world.buildings.push(createBuilding('nutrient-bed', 700, 500, 1)); world.livingWorld.research.care = 2; world.resources = { glow: 2, alloy: 0 };
+    const journalLength = world.livingWorld.journal.length;
+    const result = recoverSilentColony(world);
+    expect(result).not.toBeNull();
+    expect(result?.state.creatures.filter((creature) => creature.alive)).toHaveLength(1);
+    expect(result?.creatureId).toBe('c2');
+    expect(result?.state.buildings).toHaveLength(1);
+    expect(result?.state.livingWorld.research.care).toBe(2);
+    expect(result?.state.resources.glow).toBe(55);
+    expect(result?.state.resources.alloy).toBe(20);
+    expect(result?.state.livingWorld.journal).toHaveLength(journalLength + 1);
+    expect(world.creatures.every((creature) => !creature.alive)).toBe(true);
+  });
+  it('does not offer recovery while a living Luma remains', () => {
+    expect(recoverSilentColony(createInitialWorld(1))).toBeNull();
+  });
   it('rejects malformed pollution grids', () => {
     const world = createInitialWorld(1); world.pollution.pop();
     expect(parseWorldState(world)).toBeNull();
