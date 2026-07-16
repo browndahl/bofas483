@@ -13,6 +13,13 @@ export class DialogueScene extends Phaser.Scene {
   init(data: { id: string }) { this.entry = dialogue.find((item) => item.id === data.id) as DialogueEntry | undefined; }
   create() {
     if (!this.entry) { this.scene.stop(); return; }
+    this.renderDialogue();
+    this.scale.on('resize', this.renderDialogue, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off('resize', this.renderDialogue, this));
+  }
+  private renderDialogue() {
+    if (!this.entry) return;
+    this.children.removeAll(true);
     const { width, height } = this.scale; createDialogueBackdrop(this, width, height);
     const cardWidth = Math.min(700, width - 32);
     crisp(this.add.text(width / 2 - cardWidth / 2 + 34, height / 2 - 175, this.entry.speaker, { fontFamily: DISPLAY_FONT, fontSize: '13px', color: '#91ffd0', letterSpacing: 1.2 }));

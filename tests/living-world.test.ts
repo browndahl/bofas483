@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildingCapacity, buildingEffectMultiplier, createBuilding, upgradeDescription } from '../src/simulation/building';
+import { advancedUpgradeCost, buildingCapacity, buildingEffectMultiplier, createBuilding, upgradeDescription } from '../src/simulation/building';
+import { launchExpedition, resolveExpeditionDecision, updateExpeditions } from '../src/simulation/expeditions';
 import { updateLivingWorld, relationshipStage } from '../src/simulation/livingWorld';
 import { advanceOfflineWorld } from '../src/simulation/offlineProgress';
 import { tickWorld } from '../src/simulation/simulation';
@@ -29,6 +30,23 @@ describe('living world progression', () => {
     expect(buildingEffectMultiplier(building)).toBeGreaterThan(1);
   });
 
+  it('supports safe named expeditions, return decisions, and rare rewards', () => {
+    const world = createInitialWorld(23); world.livingWorld.unlockedRegions = ['lumen-field', 'whisper-grove']; world.resources = { glow: 200, alloy: 50 };
+    world.creatures.push(makeCreature('c2', 540, 500));
+    const result = launchExpedition(world, 'whisper-grove', ['c1', 'c2']);
+    expect(result.ok).toBe(true); expect(world.creatures.every((creature) => creature.expeditionId === result.expeditionId)).toBe(true);
+    world.time = world.livingWorld.expeditions[0].returnAt; updateExpeditions(world);
+    expect(world.livingWorld.expeditions[0].status).toBe('decision'); expect(world.creatures.every((creature) => creature.alive && !creature.expeditionId)).toBe(true);
+    expect(resolveExpeditionDecision(world, world.livingWorld.expeditions[0].id, 'preserve')).toBe(true);
+    expect(world.livingWorld.rareResources.wildSeed).toBe(2);
+  });
+
+  it('adds a final rare-material facility evolution', () => {
+    const building = createBuilding('nutrient-bed', 700, 500, 1); const base = buildingCapacity(building); building.level = 2; building.upgradeBranch = 'quality';
+    expect(advancedUpgradeCost(building).wildSeed).toBe(1); building.level = 3;
+    expect(buildingCapacity(building)).toBe(base + 2); expect(buildingEffectMultiplier(building)).toBeGreaterThan(1.5);
+  });
+
   it('disables offline simulation when the player selects a zero-minute limit', () => {
     const world = createInitialWorld(5); world.livingWorld.settings.offlineLimitMinutes = 0;
     const result = advanceOfflineWorld(world, 3600);
@@ -42,6 +60,8 @@ describe('living world progression', () => {
     delete creatures[0].traits; delete creatures[0].history; delete creatures[0].voiceStyle;
     const migrated = parseWorldState(legacy);
     expect(migrated?.livingWorld.settings.voiceVolume).toBeGreaterThan(0);
+    expect(migrated?.livingWorld.settings.textScale).toBeGreaterThanOrEqual(1.1);
+    expect(migrated?.livingWorld.expeditions).toEqual([]);
     expect(migrated?.creatures[0].history.length).toBeGreaterThan(0);
     expect(migrated?.creatures[0].voiceStyle).toBeTruthy();
   });

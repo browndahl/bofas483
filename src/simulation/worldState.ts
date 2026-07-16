@@ -13,6 +13,9 @@ export type ResearchBranch = 'care' | 'nature' | 'technology' | 'society' | 'exp
 export type WeatherKind = 'clear' | 'mist' | 'rain' | 'wind' | 'storm';
 export type SeasonKind = 'bloom' | 'suncrest' | 'amberfall' | 'frostquiet';
 export type VoiceStyle = 'chirpy' | 'round' | 'whispery' | 'raspy' | 'musical';
+export type RegionId = 'lumen-field' | 'whisper-grove' | 'mirror-marsh' | 'old-signal-ridge' | 'aurora-basin';
+export type ExpeditionStatus = 'active' | 'decision' | 'complete';
+export type ExpeditionChoice = 'preserve' | 'salvage';
 
 export interface Vec2 { x: number; y: number }
 export interface Needs { hunger: number; hygiene: number; happiness: number; health: number; energy: number }
@@ -69,6 +72,7 @@ export interface CreatureState {
   voiceCooldown: number;
   ageMilestone: number;
   currentConcern: string;
+  expeditionId?: string;
 }
 export interface BuildingState {
   id: string;
@@ -98,6 +102,20 @@ export interface GameEvent { type: string; at: number; payload: Record<string, u
 export interface AlertState { id: string; severity: 'info' | 'warning' | 'critical'; title: string; detail: string; at: number; dismissed: boolean }
 export interface JournalEntry { id: string; at: number; category: 'discovery' | 'event' | 'weather' | 'relationship' | 'birth' | 'loss' | 'milestone'; title: string; detail: string }
 export interface ChallengeState { id: string; title: string; description: string; progress: number; target: number; complete: boolean }
+export interface ExpeditionState {
+  id: string;
+  regionId: RegionId;
+  creatureIds: string[];
+  startedAt: number;
+  returnAt: number;
+  status: ExpeditionStatus;
+  risk: 'low' | 'moderate' | 'high' | 'severe';
+  outcome?: string;
+  success?: boolean;
+  glowReward?: number;
+  alloyReward?: number;
+  choice?: ExpeditionChoice;
+}
 export interface GameSettings {
   muted: boolean; voiceVolume: number; ambienceVolume: number; textScale: number; highContrast: boolean; colorBlind: boolean;
   reducedMotion: boolean; screenShake: boolean; lowPower: boolean; quality: 'low' | 'medium' | 'high'; offlineLimitMinutes: number;
@@ -105,7 +123,7 @@ export interface GameSettings {
 }
 export interface LivingWorldState {
   reputation: number; level: number; title: string; researchPoints: number; research: Record<ResearchBranch, number>;
-  unlockedRegions: string[]; rareResources: { memoryCrystal: number; wildSeed: number }; day: number; dayTime: number;
+  unlockedRegions: RegionId[]; rareResources: { memoryCrystal: number; wildSeed: number }; expeditions: ExpeditionState[]; day: number; dayTime: number;
   season: SeasonKind; weather: WeatherKind; weatherTimer: number; lastDailyEventDay: number; alerts: AlertState[]; journal: JournalEntry[];
   challenges: ChallengeState[]; settings: GameSettings; telemetry: { averageTickMs: number; peakTickMs: number; fps: number; creatures: number; visibleCreatures: number; pathRecoveries: number }; saveVersion: number;
 }
@@ -215,11 +233,11 @@ export function createInitialWorld(seed = Date.now()): WorldState {
     livingWorld: {
       reputation: 0, level: 1, title: 'Tender Signal', researchPoints: 0,
       research: { care: 0, nature: 0, technology: 0, society: 0, exploration: 0 }, unlockedRegions: ['lumen-field'],
-      rareResources: { memoryCrystal: 0, wildSeed: 0 }, day: 1, dayTime: 0.28, season: 'bloom', weather: 'clear', weatherTimer: 80, lastDailyEventDay: 0,
+      rareResources: { memoryCrystal: 0, wildSeed: 0 }, expeditions: [], day: 1, dayTime: 0.28, season: 'bloom', weather: 'clear', weatherTimer: 80, lastDailyEventDay: 0,
       alerts: [], journal: [{ id: 'awakening', at: 0, category: 'discovery', title: 'Habitat 483 awakens', detail: 'Pip-01 answered the first signal.' }],
       challenges: [],
-      settings: { muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, textScale: 1, highContrast: false, colorBlind: false, reducedMotion: false, screenShake: true, lowPower: false, quality: 'high', offlineLimitMinutes: 15, simulationSpeed: 1, paused: false, subtitles: true, tutorial: true, alertLevel: 'all' },
-      telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 }, saveVersion: 2
+      settings: { muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, textScale: 1.1, highContrast: false, colorBlind: false, reducedMotion: false, screenShake: true, lowPower: false, quality: 'high', offlineLimitMinutes: 15, simulationSpeed: 1, paused: false, subtitles: true, tutorial: true, alertLevel: 'all' },
+      telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 }, saveVersion: 3
     }
   };
 }

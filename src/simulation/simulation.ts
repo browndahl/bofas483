@@ -38,7 +38,7 @@ function openStation(building: BuildingState, queueIndex: number, buildings: Bui
 function buildServiceAssignments(creatures: CreatureState[], tasks: Map<string, TaskType>, buildingsByKind: Map<BuildingKind, BuildingState[]>, buildings: BuildingState[]) {
   const assignments = new Map<string, ServiceAssignment>();
   const loads = new Map<string, number>();
-  const waiting = creatures.filter((creature) => creature.alive && taskBuilding[tasks.get(creature.id) ?? 'wander'])
+  const waiting = creatures.filter((creature) => creature.alive && !creature.expeditionId && taskBuilding[tasks.get(creature.id) ?? 'wander'])
     .sort((a, b) => taskUrgency(b, tasks.get(b.id) ?? 'wander') - taskUrgency(a, tasks.get(a.id) ?? 'wander') || a.id.localeCompare(b.id));
   for (const creature of waiting) {
     const kind = taskBuilding[tasks.get(creature.id) ?? 'wander'];
@@ -62,7 +62,7 @@ function buildServiceAssignments(creatures: CreatureState[], tasks: Map<string, 
 
 function buildProjectAssignments(creatures: CreatureState[], tasks: Map<string, TaskType>, buildings: BuildingState[]) {
   const assignments = new Map<string, ServiceAssignment>(); const loads = new Map<string, number>();
-  const workers = creatures.filter((creature) => creature.alive && ['construct', 'maintain'].includes(tasks.get(creature.id) ?? ''))
+  const workers = creatures.filter((creature) => creature.alive && !creature.expeditionId && ['construct', 'maintain'].includes(tasks.get(creature.id) ?? ''))
     .sort((a, b) => b.personality.diligence - a.personality.diligence);
   for (const creature of workers) {
     const task = tasks.get(creature.id); const candidates = task === 'construct' ? buildings.filter((building) => building.constructing) : buildings.filter((building) => !building.constructing && building.durability < 70);
@@ -98,7 +98,7 @@ function clearSocialState(creature: CreatureState, cooldown = 0) {
 }
 
 function canSocialize(creature: CreatureState, buildings: BuildingState[], allowComfortRecipient = false): boolean {
-  if (!creature.alive || creature.age < 5 || creature.socialCooldown > 0 || creature.socialPursuitTimer >= MAX_SOCIAL_PURSUIT) return false;
+  if (!creature.alive || creature.expeditionId || creature.age < 5 || creature.socialCooldown > 0 || creature.socialPursuitTimer >= MAX_SOCIAL_PURSUIT) return false;
   const task = chooseTask(creature, buildings);
   return ['wander', 'work'].includes(task) || (allowComfortRecipient && task === 'play');
 }
@@ -328,7 +328,7 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
     group.push(building); buildingsByKind.set(building.kind, group);
   });
   next.creatures = next.creatures.map((raw) => {
-    if (!raw.alive) return raw;
+    if (!raw.alive || raw.expeditionId) return raw;
     const creature = advanceReproduction(decayNeeds(raw, seconds, pollutionAt(next, raw.x, raw.y)), seconds);
     updateCreatureHistory(creature, seconds);
     creature.socialCooldown = Math.max(0, creature.socialCooldown - seconds);
@@ -347,13 +347,13 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
   });
 
   const socialPlans = buildSocialPlans(next.creatures, next.buildings, next.time);
-  const taskPlans = new Map(next.creatures.filter((creature) => creature.alive).map((creature) => [creature.id, socialPlans.get(creature.id)?.task ?? chooseTask(creature, next.buildings)]));
+  const taskPlans = new Map(next.creatures.filter((creature) => creature.alive && !creature.expeditionId).map((creature) => [creature.id, socialPlans.get(creature.id)?.task ?? chooseTask(creature, next.buildings)]));
   const serviceAssignments = buildServiceAssignments(next.creatures, taskPlans, buildingsByKind, next.buildings);
   buildProjectAssignments(next.creatures, taskPlans, next.buildings).forEach((assignment, id) => serviceAssignments.set(id, assignment));
-  const socialGrid = new SpatialGrid<CreatureState>(128); socialGrid.rebuild(next.creatures.filter((creature) => creature.alive));
+  const socialGrid = new SpatialGrid<CreatureState>(128); socialGrid.rebuild(next.creatures.filter((creature) => creature.alive && !creature.expeditionId));
   const newborns: CreatureState[] = [];
   next.creatures = next.creatures.map((creature) => {
-    if (!creature.alive) return creature;
+    if (!creature.alive || creature.expeditionId) return creature;
     const socialPlan = socialPlans.get(creature.id);
     const task = taskPlans.get(creature.id) ?? chooseTask(creature, next.buildings);
     creature.task = task;

@@ -1,4 +1,4 @@
-import type { BuildingKind, BuildingState, Resources, Vec2 } from './worldState';
+import type { BuildingKind, BuildingState, LivingWorldState, Resources, Vec2 } from './worldState';
 import { isHabitatObstacle } from './navigation';
 
 export interface BuildingDefinition {
@@ -56,24 +56,45 @@ export function createBuilding(kind: BuildingKind, x: number, y: number, index: 
 }
 
 export function buildingDisplayName(building: BuildingState) {
+  if (building.level >= 3) return `Ascendant ${BUILDINGS[building.kind].name}`;
   if (building.level < 2) return BUILDINGS[building.kind].name;
   return building.upgradeBranch === 'capacity' ? `${BUILDINGS[building.kind].name} Commons` : BUILDINGS[building.kind].upgrade.name;
 }
 
 export function buildingCapacity(building: BuildingState) {
-  return BUILDINGS[building.kind].capacity + (building.level >= 2 ? building.upgradeBranch === 'capacity' ? 2 : 1 : 0);
+  return BUILDINGS[building.kind].capacity + (building.level >= 2 ? building.upgradeBranch === 'capacity' ? 2 : 1 : 0) + (building.level >= 3 ? 1 : 0);
 }
 
 export function buildingEffectMultiplier(building: BuildingState) {
   const condition = building.durability < 30 ? 0.72 : building.durability < 60 ? 0.9 : 1;
   if (building.level < 2) return condition;
-  return (building.upgradeBranch === 'capacity' ? 1.14 : building.kind === 'extractor' ? 1.3 : 1.35) * condition;
+  const tierTwo = building.upgradeBranch === 'capacity' ? 1.14 : building.kind === 'extractor' ? 1.3 : 1.35;
+  return tierTwo * (building.level >= 3 ? 1.22 : 1) * condition;
 }
 
 export function buildingPollution(building: BuildingState) {
   const base = BUILDINGS[building.kind].pollution;
   const maintenanceLeak = building.durability < 35 ? 1.25 : 1;
-  return (building.level >= 2 && building.kind === 'extractor' && building.upgradeBranch !== 'capacity' ? base * 0.75 : base) * maintenanceLeak;
+  const sealed = building.level >= 2 && building.kind === 'extractor' && building.upgradeBranch !== 'capacity' ? base * 0.75 : base;
+  return (building.level >= 3 && building.kind === 'extractor' ? sealed * 0.7 : sealed) * maintenanceLeak;
+}
+
+export function advancedUpgradeCost(building: BuildingState) {
+  const base = BUILDINGS[building.kind].upgrade.cost;
+  const natural = ['nutrient-bed', 'wash-pool', 'resonance-garden', 'nest'].includes(building.kind);
+  return { glow: Math.ceil(base.glow * 1.45), alloy: Math.ceil(base.alloy * 1.35), memoryCrystal: natural ? 0 : 1, wildSeed: natural ? 1 : 0 };
+}
+
+export function advancedUpgradeDescription(building: BuildingState) {
+  const resource = advancedUpgradeCost(building).wildSeed ? 'WILD SEED' : 'MEMORY CRYSTAL';
+  return `Ascendant form: +22% output, +1 station, and a visible ${resource.toLowerCase()} evolution.`;
+}
+
+export function canAffordAdvancedUpgrade(resources: Resources, livingWorld: LivingWorldState, building: BuildingState) {
+  if (building.level !== 2) return false;
+  const cost = advancedUpgradeCost(building);
+  return resources.glow >= cost.glow && resources.alloy >= cost.alloy
+    && livingWorld.rareResources.memoryCrystal >= cost.memoryCrystal && livingWorld.rareResources.wildSeed >= cost.wildSeed;
 }
 
 export function upgradeCost(building: BuildingState, branch: 'quality' | 'capacity' = 'quality') {

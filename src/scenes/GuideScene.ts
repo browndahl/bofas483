@@ -32,6 +32,10 @@ const PAGES = [
   {
     title: 'COLONY COMMAND',
     body: 'OVERVIEW\nShows level, reputation, weather, season, regions, rare stores, alerts, and optional challenges. Alerts explain shortages, sickness, loneliness, and crowding and can be dismissed.\n\nLUMA\nA complete identity card with personality, work stress, current concern, role assignment, six skill bars, family, strongest relationship, traits, memories, and life history.\n\nJOURNAL\nRecords named births, relationship changes, discoveries, weather, milestones, and daily events.\n\nSETTINGS\nSeparate creature voice volume, mute, subtitles, scalable text, contrast, color-safe indicators, reduced motion, screen feedback, quality, low-power, offline limit, pause, speeds, and fullscreen.\n\nSAVES\nThree manual slots, automatic recovery backups, last-save time, and portable JSON export/import. Production saves are isolated from development testing.\n\nSHORTCUTS\nSPACE pause  ·  1/2/3 speeds  ·  P photo mode  ·  G guide  ·  ESC close.'
+  },
+  {
+    title: 'EXPEDITIONS',
+    body: 'REGIONAL PERMITS\nReputation raises habitat level and unlocks Whisper Grove, Mirror Marsh, Old Signal Ridge, and Aurora Basin. Each region has a visible supply cost, travel time, risk, and likely discovery.\n\nTEAMS\nOpen COLONY → EXPLORE. The habitat recommends 2–3 available Luma, favoring trained Explorers. CHANGE TEAM rotates the roster. Expedition members leave the field and cannot use facilities until they return.\n\nSAFE RISK\nDistance and low skill can reduce rewards and drain needs, but expeditions never kill a Luma. Exploration skill, resilience, team size, and Exploration research improve outcomes.\n\nDISCOVERY DECISIONS\nEvery return names the Luma involved and pauses for a choice. PRESERVE protects the site, earning Wild Seed and sustainability. SALVAGE takes a relic, earning Memory Crystal, ALLOY, and ambition.\n\nADVANCED PROGRESSION\nResearch levels 3–5 require regional rare matter. A level-2 facility can consume one matching rare resource to ascend to level 3, gaining +22% output, another service station, and a final visual evolution.'
   }
 ] as const;
 
@@ -71,7 +75,7 @@ export class GuideScene extends Phaser.Scene {
     search.on('pointerup', () => this.search());
     this.titleText = crisp(this.add.text(left + 26, top + 65, '', { fontFamily: DISPLAY_FONT, fontSize: '14px', color: '#f7bd62', letterSpacing: 1.2 }));
     this.bodyText = crisp(this.add.text(left + 26, top + 94, '', { fontFamily: UI_FONT, fontSize: width < 500 ? '12px' : '13px', color: '#e4f7ed', lineSpacing: width < 500 ? 3 : 5, wordWrap: { width: cardWidth - 52 } }));
-    const labels = ['START', 'NEEDS', 'BUILD', 'CONTROLS', 'ROLES', 'COLONY'];
+    const labels = ['START', 'NEEDS', 'BUILD', 'CONTROL', 'ROLES', 'COLONY', 'EXPLORE'];
     const gap = 5; const tabWidth = (cardWidth - 52 - gap * (labels.length - 1)) / labels.length;
     labels.forEach((label, index) => {
       const tab = button(this, left + 26 + tabWidth / 2 + index * (tabWidth + gap), top + cardHeight - 30, tabWidth, 38, label, index === 0 ? 0xf7bd62 : 0x7af6bd);

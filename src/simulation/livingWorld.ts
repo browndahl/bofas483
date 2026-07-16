@@ -1,5 +1,6 @@
-import type { BuildingState, CreatureState, GameEvent, JournalEntry, LivingWorldState, ResearchBranch, WorldState } from './worldState';
+import type { BuildingState, CreatureState, GameEvent, JournalEntry, LivingWorldState, RegionId, ResearchBranch, WorldState } from './worldState';
 import { appendWorldEvent } from './worldState';
+import { updateExpeditions } from './expeditions';
 
 export const RESEARCH_BRANCHES: Record<ResearchBranch, { name: string; description: string; bonus: string }> = {
   care: { name: 'CARE', description: 'Gentler recovery and stronger offline safety.', bonus: '+5% care efficiency per level' },
@@ -32,6 +33,7 @@ export function createLivingWorld(): LivingWorldState {
     research: { care: 0, nature: 0, technology: 0, society: 0, exploration: 0 },
     unlockedRegions: ['lumen-field'],
     rareResources: { memoryCrystal: 0, wildSeed: 0 },
+    expeditions: [],
     day: 1,
     dayTime: 0.28,
     season: 'bloom',
@@ -46,12 +48,12 @@ export function createLivingWorld(): LivingWorldState {
       { id: 'master-builder', title: 'Master Builder', description: 'Complete three facility upgrades.', progress: 0, target: 3, complete: false }
     ],
     settings: {
-      muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, textScale: 1, highContrast: false, colorBlind: false,
+      muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, textScale: 1.1, highContrast: false, colorBlind: false,
       reducedMotion: false, screenShake: true, lowPower: false, quality: 'high', offlineLimitMinutes: 15, simulationSpeed: 1, paused: false,
       subtitles: true, tutorial: true, alertLevel: 'all'
     },
     telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 },
-    saveVersion: 2
+    saveVersion: 3
   };
 }
 
@@ -63,9 +65,14 @@ export function ensureLivingWorld(world: WorldState) {
   world.livingWorld.settings = { ...defaults.settings, ...world.livingWorld.settings };
   world.livingWorld.telemetry = { ...defaults.telemetry, ...world.livingWorld.telemetry };
   world.livingWorld.unlockedRegions ??= ['lumen-field'];
+  world.livingWorld.expeditions ??= [];
   world.livingWorld.alerts ??= [];
   world.livingWorld.journal ??= defaults.journal;
   if (!world.livingWorld.challenges?.length) world.livingWorld.challenges = defaults.challenges;
+  if ((world.livingWorld.saveVersion ?? 2) < 3) {
+    world.livingWorld.settings.textScale = Math.max(1.1, world.livingWorld.settings.textScale);
+    world.livingWorld.saveVersion = 3;
+  }
 }
 
 export function addJournal(world: WorldState, entry: Omit<JournalEntry, 'id' | 'at'> & { id?: string; at?: number }) {
@@ -110,14 +117,22 @@ function updateChallenges(world: WorldState) {
 
 function updateAlerts(world: WorldState) {
   const living = world.creatures.filter((creature) => creature.alive);
-  if (!living.length) addAlert(world, 'silent-colony', 'critical', 'The habitat is silent', 'Begin a new habitat to restore living signals.');
   const hungry = living.filter((creature) => creature.needs.hunger < 25).length;
   const sick = living.filter((creature) => creature.needs.health < 45).length;
   const lonely = living.filter((creature) => creature.needs.happiness < 30).length;
+  const queues = world.buildings.filter((building) => world.creatures.filter((creature) => creature.destinationBuildingId === building.id && !creature.isBeingServed).length >= 3);
+  const managed = new Set(['silent-colony', 'food-shortage', 'illness', 'loneliness', 'overcrowding']);
+  const active = new Set<string>();
+  if (!living.length) active.add('silent-colony');
+  if (hungry) active.add('food-shortage');
+  if (sick) active.add('illness');
+  if (lonely) active.add('loneliness');
+  if (queues.length) active.add('overcrowding');
+  world.livingWorld.alerts = world.livingWorld.alerts.filter((alert) => !managed.has(alert.id) || active.has(alert.id));
+  if (!living.length) addAlert(world, 'silent-colony', 'critical', 'The habitat is silent', 'Use Recovery Options to restore a living signal without erasing colony history.');
   if (hungry) addAlert(world, 'food-shortage', hungry > 2 ? 'critical' : 'warning', 'Nourishment shortage', `${hungry} Luma need a Dew Loom or direct feeding.`);
   if (sick) addAlert(world, 'illness', sick > 2 ? 'critical' : 'warning', 'Integrity warning', `${sick} Luma need treatment or cleaner ground.`);
   if (lonely) addAlert(world, 'loneliness', 'warning', 'The chorus is fading', `${lonely} Luma need play, companionship, or a Chime Grove.`);
-  const queues = world.buildings.filter((building) => world.creatures.filter((creature) => creature.destinationBuildingId === building.id && !creature.isBeingServed).length >= 3);
   if (queues.length) addAlert(world, 'overcrowding', 'warning', 'Facility overcrowding', `${queues.length} facilities have long queues. Add capacity or another building.`);
   world.livingWorld.alerts = world.livingWorld.alerts.filter((alert) => world.time - alert.at < 180 || !alert.dismissed);
 }
@@ -147,6 +162,7 @@ function dailyEvent(world: WorldState) {
 
 export function updateLivingWorld(world: WorldState, seconds: number) {
   ensureLivingWorld(world);
+  updateExpeditions(world);
   const living = world.creatures.filter((creature) => creature.alive);
   const averageWellbeing = living.length ? living.reduce((sum, creature) => sum + Object.values(creature.needs).reduce((a, b) => a + b, 0) / 5, 0) / living.length : 0;
   world.livingWorld.dayTime = (world.livingWorld.dayTime + seconds / 240) % 1;
@@ -165,7 +181,7 @@ export function updateLivingWorld(world: WorldState, seconds: number) {
     world.livingWorld.level = level; world.resources.glow += level * 20; world.livingWorld.title = TITLES[level - 1];
     addJournal(world, { id: `colony-level-${level}`, category: 'milestone', title: `Habitat level ${level}: ${world.livingWorld.title}`, detail: `The colony receives +${level * 20} GLOW and a new regional permit.` });
   }
-  const regionNames = ['lumen-field', 'whisper-grove', 'mirror-marsh', 'old-signal-ridge', 'aurora-basin'];
+  const regionNames: RegionId[] = ['lumen-field', 'whisper-grove', 'mirror-marsh', 'old-signal-ridge', 'aurora-basin'];
   world.livingWorld.unlockedRegions = regionNames.slice(0, world.livingWorld.level);
   world.livingWorld.title = TITLES[world.livingWorld.level - 1];
   world.livingWorld.telemetry.creatures = living.length;

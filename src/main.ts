@@ -36,7 +36,7 @@ const game = new Phaser.Game({
   backgroundColor: '#050b09',
   transparent: false,
   scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH, width: window.innerWidth, height: window.innerHeight },
-  render: { antialias: false, pixelArt: true, roundPixels: true, powerPreference: 'high-performance' },
+  render: { antialias: true, pixelArt: false, roundPixels: false, powerPreference: 'high-performance' },
   fps: { target: 60, min: 30, smoothStep: true },
   input: { activePointers: 3 },
   dom: { createContainer: true },

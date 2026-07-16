@@ -2,14 +2,15 @@ import Phaser from 'phaser';
 import { RESEARCH_BRANCHES, relationshipStage } from '../simulation/livingWorld';
 import { OBJECTIVES } from '../simulation/progression';
 import { ROLE_LABELS, SKILL_KEYS, SKILL_LABELS, skillLevel } from '../simulation/colonyLife';
-import type { CreatureRole, GameSettings, ResearchBranch } from '../simulation/worldState';
+import { expeditionResearchCost, REGIONS } from '../simulation/expeditions';
+import type { CreatureRole, GameSettings, RegionId, ResearchBranch } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
 import { saveService } from '../services/saveService';
 import { button, panel } from '../ui/hud';
 import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
 
-type Page = 'OVERVIEW' | 'RESEARCH' | 'LUMA' | 'JOURNAL' | 'SETTINGS' | 'SAVES' | 'CHANGELOG';
-const PAGES: Page[] = ['OVERVIEW', 'RESEARCH', 'LUMA', 'JOURNAL', 'SETTINGS', 'SAVES', 'CHANGELOG'];
+type Page = 'OVERVIEW' | 'EXPLORE' | 'RESEARCH' | 'LUMA' | 'JOURNAL' | 'SETTINGS' | 'SAVES' | 'CHANGELOG';
+const PAGES: Page[] = ['OVERVIEW', 'EXPLORE', 'RESEARCH', 'LUMA', 'JOURNAL', 'SETTINGS', 'SAVES', 'CHANGELOG'];
 const ROLES: Array<CreatureRole | 'auto'> = ['auto', 'forager', 'caretaker', 'healer', 'builder', 'researcher', 'explorer'];
 
 export class ColonyScene extends Phaser.Scene {
@@ -20,6 +21,7 @@ export class ColonyScene extends Phaser.Scene {
   private content?: Phaser.GameObjects.Container;
   private header?: Phaser.GameObjects.Text;
   private tabs: Phaser.GameObjects.Container[] = [];
+  private teamCursor = 0;
 
   constructor() { super('ColonyScene'); }
 
@@ -43,13 +45,15 @@ export class ColonyScene extends Phaser.Scene {
     this.header = crisp(this.add.text(left + 24, top + 18, '', { fontFamily: DISPLAY_FONT, fontSize: width < 560 ? '14px' : '19px', color: '#91ffd0', letterSpacing: 1.2 }));
     const close = crisp(this.add.text(left + cardWidth - 18, top + 8, '×', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '32px', color: '#fff0a8' })).setOrigin(1, 0).setInteractive({ useHandCursor: true });
     close.on('pointerup', () => this.scene.stop());
-    const usable = cardWidth - 48; const gap = 5; const tabWidth = (usable - gap * (PAGES.length - 1)) / PAGES.length;
+    const usable = cardWidth - 48; const gap = 5; const compactTabs = width < 640; const columns = compactTabs ? 4 : PAGES.length;
+    const tabWidth = (usable - gap * (columns - 1)) / columns;
     PAGES.forEach((page, index) => {
-      const control = button(this, left + 24 + tabWidth / 2 + index * (tabWidth + gap), top + 66, tabWidth, 32, width < 640 ? page.slice(0, 4) : page, page === this.page ? 0xf7bd62 : 0x7af6bd);
+      const column = index % columns; const row = Math.floor(index / columns);
+      const control = button(this, left + 24 + tabWidth / 2 + column * (tabWidth + gap), top + 66 + row * 36, tabWidth, 32, compactTabs ? page.slice(0, 4) : page, page === this.page ? 0xf7bd62 : 0x7af6bd);
       control.setScale(width < 480 ? 0.98 : 1); control.on('pointerup', () => { this.page = page; this.rebuild(); }); this.tabs.push(control);
     });
-    this.content = this.add.container(left + 24, top + 98);
-    this.content.setData({ width: usable, height: cardHeight - 116 });
+    this.content = this.add.container(left + 24, top + (compactTabs ? 134 : 98));
+    this.content.setData({ width: usable, height: cardHeight - (compactTabs ? 152 : 116) });
     this.renderPage();
   };
 
@@ -58,6 +62,7 @@ export class ColonyScene extends Phaser.Scene {
     this.content.removeAll(true);
     this.header.setText(`COLONY COMMAND  /  ${this.page}`);
     if (this.page === 'OVERVIEW') this.renderOverview();
+    if (this.page === 'EXPLORE') this.renderExplore();
     if (this.page === 'RESEARCH') this.renderResearch();
     if (this.page === 'LUMA') this.renderLuma();
     if (this.page === 'JOURNAL') this.renderJournal();
@@ -105,13 +110,61 @@ export class ColonyScene extends Phaser.Scene {
     const { width } = this.dimensions(); const world = this.state.livingWorld;
     this.addText(0, 0, `AVAILABLE RESEARCH  ${Math.floor(world.researchPoints)} RP\nHealthy, happy Luma generate research over time. Each branch reaches level 5.`, 12, '#e4f7ed', width);
     (Object.keys(RESEARCH_BRANCHES) as ResearchBranch[]).forEach((branch, index) => {
-      const item = RESEARCH_BRANCHES[branch]; const level = world.research[branch]; const cost = 20 + level * 15; const y = 70 + index * 88;
+      const item = RESEARCH_BRANCHES[branch]; const level = world.research[branch]; const cost = expeditionResearchCost(this.state, branch); const y = 70 + index * 88;
       this.addHeading(0, y, `${item.name}  ·  LEVEL ${level}/5`, ['#7af6bd', '#9fe36b', '#65c7ff', '#bf78ff', '#f7bd62'][index]);
       this.addText(0, y + 25, `${item.description}\n${item.bonus}`, 11, '#dff5ea', width - 174);
-      const control = this.addButton(width - 76, y + 29, 150, level >= 5 ? 'MASTERED' : `UNLOCK ${cost} RP`, 0xf7bd62, () => {
-        if (!gameStore.unlockResearch(branch)) this.toast(level >= 5 ? 'This research branch is mastered' : 'More research points are needed');
+      const rare = cost.rare ? ` + ${cost.rareAmount} ${cost.rare === 'memoryCrystal' ? 'CRYSTAL' : 'SEED'}` : '';
+      const control = this.addButton(width - 86, y + 29, 170, level >= 5 ? 'MASTERED' : `UNLOCK ${cost.rp} RP${rare}`, 0xf7bd62, () => {
+        if (!gameStore.unlockResearch(branch)) this.toast(level >= 5 ? 'This research branch is mastered' : 'This tier needs more research or regional rare matter');
       });
-      if (level >= 5 || world.researchPoints < cost) control.setAlpha(0.48);
+      const rareReady = !cost.rare || world.rareResources[cost.rare] >= cost.rareAmount;
+      if (level >= 5 || world.researchPoints < cost.rp || !rareReady) control.setAlpha(0.48);
+    });
+  }
+
+  private expeditionTeam() {
+    const available = this.state.creatures.filter((creature) => creature.alive && !creature.expeditionId)
+      .sort((a, b) => (b.assignedRole === 'explorer' ? 40 : 0) + b.skills.exploration - ((a.assignedRole === 'explorer' ? 40 : 0) + a.skills.exploration));
+    if (available.length <= 2) return available;
+    const offset = this.teamCursor % available.length;
+    return [...available.slice(offset), ...available.slice(0, offset)].slice(0, Math.min(3, available.length));
+  }
+
+  private renderExplore() {
+    const { width } = this.dimensions(); const world = this.state.livingWorld; const compact = width < 600;
+    const unresolved = [...world.expeditions].reverse().find((item) => item.status === 'active' || item.status === 'decision');
+    this.addText(0, 0, 'Send 2–3 Luma beyond the habitat. Teams leave the map, return alive with named outcomes, and ask you what their discoveries should become.', compact ? 9 : 11, '#dff5ea', width);
+    if (unresolved?.status === 'active') {
+      const region = REGIONS[unresolved.regionId]; const team = unresolved.creatureIds.map((id) => this.state.creatures.find((creature) => creature.id === id)?.name).filter(Boolean).join(' · ');
+      const total = Math.max(1, unresolved.returnAt - unresolved.startedAt); const progress = Phaser.Math.Clamp((this.state.time - unresolved.startedAt) / total, 0, 1);
+      this.addHeading(0, 62, `${region.glyph}  EXPEDITION ACTIVE / ${region.name.toUpperCase()}`, '#65c7ff');
+      this.addText(0, 88, `TEAM  ${team}\nRISK  ${unresolved.risk.toUpperCase()}  ·  RETURN IN ${Math.max(0, Math.ceil(unresolved.returnAt - this.state.time))}s`, 12, '#e4f7ed', width);
+      const back = this.add.rectangle(0, 145, width, 12, 0x211d15).setOrigin(0, 0.5).setStrokeStyle(1, 0x65c7ff); const fill = this.add.rectangle(0, 145, width * progress, 8, 0x65c7ff).setOrigin(0, 0.5); this.content?.add([back, fill]);
+      this.addText(0, 166, 'Their needs are safely paused from colony work. No expedition outcome can kill a Luma.', 11, '#90c9b0', width);
+      return;
+    }
+    if (unresolved?.status === 'decision') {
+      const region = REGIONS[unresolved.regionId];
+      this.addHeading(0, 62, `${region.glyph}  DECISION REQUIRED / ${region.name.toUpperCase()}`, '#ff8fcf');
+      this.addText(0, 91, `${unresolved.outcome}\n\nRETURNED  +${unresolved.glowReward} GLOW · +${unresolved.alloyReward} ALLOY`, 12, '#e4f7ed', width);
+      this.addText(0, 190, 'PRESERVE  +2 Wild Seed · +10 reputation · sustainability\nSALVAGE  +1 Memory Crystal · +20 ALLOY · ambition', 11, '#ffe1a0', width);
+      this.addButton(width * 0.25, 260, Math.min(250, width * 0.42), 'PRESERVE SITE', 0x7af6bd, () => gameStore.resolveExpedition(unresolved.id, 'preserve'));
+      this.addButton(width * 0.75, 260, Math.min(250, width * 0.42), 'SALVAGE RELIC', 0xff735f, () => gameStore.resolveExpedition(unresolved.id, 'salvage'));
+      return;
+    }
+    const team = this.expeditionTeam(); const teamNames = team.map((creature) => `${creature.name} L${skillLevel(creature.skills.exploration)}`).join(' · ');
+    this.addHeading(0, compact ? 72 : 60, 'RECOMMENDED TEAM'); this.addText(0, compact ? 98 : 86, teamNames || 'At least two available Luma are required.', compact ? 10 : 12, '#e4f7ed', width - 170);
+    this.addButton(width - 75, compact ? 104 : 92, 146, 'CHANGE TEAM', 0x65c7ff, () => { this.teamCursor++; this.renderPage(); });
+    const regionIds = (Object.keys(REGIONS) as RegionId[]).filter((id) => id !== 'lumen-field');
+    regionIds.forEach((regionId, index) => {
+      const region = REGIONS[regionId]; const y = (compact ? 150 : 136) + index * (compact ? 112 : 104); const unlocked = world.unlockedRegions.includes(regionId); const affordable = this.state.resources.glow >= region.supply.glow && this.state.resources.alloy >= region.supply.alloy && team.length >= 2;
+      this.addHeading(0, y, compact ? `${region.glyph}  ${region.name.toUpperCase()}` : `${region.glyph}  ${region.name.toUpperCase()}  ·  ${unlocked ? region.risk.toUpperCase() : `LOCKED / LEVEL ${region.level}`}`, unlocked ? '#f7bd62' : '#6d8177');
+      const detail = compact ? `${unlocked ? region.risk.toUpperCase() : `PERMIT LEVEL ${region.level}`}\n${region.duration}s · ${region.supply.glow} GLOW / ${region.supply.alloy} ALLOY\nDISCOVERY ${region.discovery.toUpperCase()}` : `${region.description}\n${region.duration}s · ${region.supply.glow} GLOW / ${region.supply.alloy} ALLOY · DISCOVERY ${region.discovery.toUpperCase()}`;
+      this.addText(0, y + 25, detail, compact ? 9 : 10, unlocked ? '#dff5ea' : '#788b82', width - 180);
+      const control = this.addButton(width - 76, y + (compact ? 57 : 42), compact ? 146 : 160, unlocked ? 'BEGIN EXPEDITION' : 'PERMIT LOCKED', unlocked ? 0x7af6bd : 0x788b82, () => {
+        const result = gameStore.startExpedition(regionId, team.map((creature) => creature.id)); if (!result.ok) this.toast(result.reason ?? 'The expedition could not depart');
+      });
+      if (!unlocked || !affordable) control.setAlpha(0.45);
     });
   }
 
@@ -220,8 +273,8 @@ export class ColonyScene extends Phaser.Scene {
 
   private renderChangelog() {
     const { width } = this.dimensions();
-    this.addHeading(0, 0, 'FIRST HOUR & RECOVERY UPDATE  /  2026.07');
-    this.addText(0, 30, 'NEW COLONY JOURNEY\nA 15-step guided opening now teaches direct care, construction, automation, division, roles, research, facility upgrades, reputation, industry, and the final Audit. Every step shows its exact reward and opens contextual help when clicked. Early rewards deliberately fund the next system.\n\nRECOVERY\nA fully silent habitat now offers a Recovery Signal that preserves buildings, research, relationships, and history; automatic backup restore; or a confirmed fresh start. Offline summaries route silent colonies directly to these options.\n\nPACING\nNeed decay is gentler, construction is faster, division has more readable timing, and healthy Luma generate useful research earlier. The first 30–60 minutes now build complexity instead of creating a care emergency.\n\nLIVING WORLD\nOriginal positional voices, roles, six skills, preferences, relationships, upgrades, queues, colony reputation, research paths, events, day/night, weather, save slots, offline reports, accessibility controls, worker telemetry, and production smoke tests remain fully integrated.', 12, '#e4f7ed', width);
+    this.addHeading(0, 0, 'MIDGAME EXPLORATION & CLARITY UPDATE  /  2026.07');
+    this.addText(0, 30, 'EXPEDITIONS\nFour regional permits now open through habitat reputation. Build teams of 2–3 Luma, pay visible supply costs, follow timed journeys, and receive safe but skill-sensitive named outcomes. Every return asks whether to preserve a discovery or salvage its relic.\n\nADVANCED PROGRESSION\nExpeditions produce Wild Seed and Memory Crystal. Research tiers 3–5 consume rare matter, and every level-2 facility can now evolve into a visible level-3 Ascendant form with more output and capacity. Five new guided steps teach the complete loop.\n\nREADABILITY\nAll game text now uses anti-aliased, high-resolution rendering, subpixel placement, stronger system fonts, clearer weights and contrast, larger creature-card labels, a 110% default text scale, and a two-row mobile command layout.\n\nRECOVERY & LIVING WORLD\nRecovery signals, offline reports, original positional voices, roles, six skills, preferences, relationships, queues, reputation, events, weather, save slots, accessibility controls, telemetry, and production smoke tests remain fully integrated.', 12, '#e4f7ed', width);
   }
 
   private shutdown() { this.unsubscribe?.(); this.unsubscribe = undefined; this.scale.off('resize', this.rebuild, this); this.input.keyboard?.removeAllListeners(); }

@@ -32,11 +32,11 @@ const creature = z.object({
   history: z.array(z.object({ at: finite, title: z.string().max(100), detail: z.string().max(240) })).max(100).optional(),
   parentId: z.string().max(40).optional(), childrenIds: z.array(z.string().max(40)).max(32).optional(), mentorId: z.string().max(40).optional(),
   favoriteFood: z.string().max(60).optional(), favoriteCompanionId: z.string().max(40).optional(), routeMemory: z.array(vec2).max(12).optional(),
-  voiceStyle: z.enum(['chirpy', 'round', 'whispery', 'raspy', 'musical']).optional(), voiceCooldown: finite.nonnegative().optional(), ageMilestone: z.number().int().min(0).optional(), currentConcern: z.string().max(120).optional()
+  voiceStyle: z.enum(['chirpy', 'round', 'whispery', 'raspy', 'musical']).optional(), voiceCooldown: finite.nonnegative().optional(), ageMilestone: z.number().int().min(0).optional(), currentConcern: z.string().max(120).optional(), expeditionId: z.string().max(80).optional()
 });
 const building = z.object({
   id: z.string().min(1).max(40), kind: z.enum(['nutrient-bed', 'wash-pool', 'resonance-garden', 'nest', 'extractor', 'clinic']),
-  x: finite, y: finite, level: z.number().int().min(1).max(2), active: z.boolean(), upgradeBranch: z.enum(['quality', 'capacity']).optional(),
+  x: finite, y: finite, level: z.number().int().min(1).max(3), active: z.boolean(), upgradeBranch: z.enum(['quality', 'capacity']).optional(),
   durability: finite.min(0).max(100).optional(), constructionProgress: finite.min(0).max(100).optional(), constructing: z.boolean().optional(), influenceRadius: finite.min(50).max(400).optional()
 });
 const personality = z.object({
@@ -52,7 +52,12 @@ const settings = z.object({
 });
 const livingWorld = z.object({
   reputation: finite.nonnegative(), level: z.number().int().min(1).max(5), title: z.string().max(100), researchPoints: finite.nonnegative(), research,
-  unlockedRegions: z.array(z.string().max(80)).max(12), rareResources: z.object({ memoryCrystal: z.number().int().nonnegative(), wildSeed: z.number().int().nonnegative() }),
+  unlockedRegions: z.array(z.enum(['lumen-field', 'whisper-grove', 'mirror-marsh', 'old-signal-ridge', 'aurora-basin'])).max(5), rareResources: z.object({ memoryCrystal: z.number().int().nonnegative(), wildSeed: z.number().int().nonnegative() }),
+  expeditions: z.array(z.object({
+    id: z.string().min(1).max(80), regionId: z.enum(['lumen-field', 'whisper-grove', 'mirror-marsh', 'old-signal-ridge', 'aurora-basin']), creatureIds: z.array(z.string().max(40)).min(1).max(3),
+    startedAt: finite.nonnegative(), returnAt: finite.nonnegative(), status: z.enum(['active', 'decision', 'complete']), risk: z.enum(['low', 'moderate', 'high', 'severe']),
+    outcome: z.string().max(500).optional(), success: z.boolean().optional(), glowReward: finite.nonnegative().optional(), alloyReward: finite.nonnegative().optional(), choice: z.enum(['preserve', 'salvage']).optional()
+  })).max(20).optional(),
   day: z.number().int().min(1), dayTime: finite.min(0).max(1), season: z.enum(['bloom', 'suncrest', 'amberfall', 'frostquiet']), weather: z.enum(['clear', 'mist', 'rain', 'wind', 'storm']),
   weatherTimer: finite, lastDailyEventDay: z.number().int().min(0),
   alerts: z.array(z.object({ id: z.string().max(100), severity: z.enum(['info', 'warning', 'critical']), title: z.string().max(100), detail: z.string().max(240), at: finite, dismissed: z.boolean() })).max(20),

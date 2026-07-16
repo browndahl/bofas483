@@ -19,7 +19,7 @@ export function button(scene: Phaser.Scene, x: number, y: number, width: number,
 }
 
 export function meter(scene: Phaser.Scene, x: number, y: number, width: number, label: string, color: number) {
-  const title = crisp(scene.add.text(x, y, label, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#dbc99b', letterSpacing: 0.3 }));
+  const title = crisp(scene.add.text(x, y, label, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '12px', color: '#f1dfae', letterSpacing: 0.2 }));
   const back = scene.add.rectangle(x, y + 15, width, 8, 0x211d15, 1).setOrigin(0, 0.5).setStrokeStyle(1, 0x8b7147, 0.7);
   const fill = scene.add.rectangle(x, y + 15, width, 6, color, 1).setOrigin(0, 0.5);
   return { title, back, fill, width, target: width };

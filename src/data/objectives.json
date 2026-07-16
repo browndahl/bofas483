@@ -13,6 +13,11 @@
   { "id": "population-6", "title": "Reach the care threshold", "hint": "Support 6 living Luma without letting urgent needs pile up.", "reward": 60, "reputationReward": 8 },
   { "id": "colony-level-2", "title": "Earn habitat level 2", "hint": "Healthy Luma and completed guidance steps build reputation over time.", "reward": 50, "reputationReward": 5 },
   { "id": "industry", "title": "Commission a Deep Taker", "hint": "Industry creates resources quickly, but its pollution changes the habitat.", "reward": 80, "reputationReward": 8 },
+  { "id": "first-expedition", "title": "Cross the habitat boundary", "hint": "Open COLONY → EXPLORE and send 2–3 Luma to Whisper Grove.", "reward": 40, "researchReward": 40, "reputationReward": 10 },
+  { "id": "expedition-decision", "title": "Decide what discovery means", "hint": "Open COLONY → EXPLORE and preserve the site or salvage its relic.", "reward": 45, "researchReward": 45, "wildSeedReward": 1, "memoryCrystalReward": 1, "reputationReward": 10 },
+  { "id": "advanced-research", "title": "Unlock advanced research", "hint": "Use expedition rare matter to raise any research branch to level 3.", "reward": 80, "alloyReward": 30, "reputationReward": 12 },
+  { "id": "advanced-upgrade", "title": "Evolve a facility", "hint": "Select a level-2 facility and use regional rare matter to ascend it to level 3.", "reward": 80, "reputationReward": 15 },
+  { "id": "region-3", "title": "Open Mirror Marsh", "hint": "Maintain a thriving habitat until reputation unlocks the third regional permit.", "reward": 60, "reputationReward": 8 },
   { "id": "ending", "title": "Answer the Audit", "hint": "Grow the colony, reach the final question, and choose what freedom means.", "reward": 0, "reputationReward": 10 },
   { "id": "first-death", "title": "Remember the silent", "hint": "Loss is recorded, but it never blocks the main journey.", "reward": 0, "optional": true }
 ]

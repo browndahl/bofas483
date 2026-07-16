@@ -369,7 +369,8 @@ export class WorldScene extends Phaser.Scene {
     const glyph = crisp(this.add.text(33, -24, def.glyph, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: Phaser.Display.Color.IntegerToColor(def.color).rgba, backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
     if (building.constructing) { art.fillStyle(0xf7bd62, 0.95).fillRect(-44, -36, 88 * building.constructionProgress / 100, 5); }
     if (building.level >= 2) art.fillStyle(def.color, 0.9).fillRect(-36, -38, 9, 9).fillRect(27, -38, 9, 9).fillStyle(0xfff0ba, 0.9).fillRect(-33, -35, 3, 3).fillRect(30, -35, 3, 3);
-    const level = crisp(this.add.text(-34, -27, building.level >= 2 ? 'Ⅱ' : 'Ⅰ', { fontFamily: DISPLAY_FONT, fontSize: '11px', color: '#fff0ba', backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
+    if (building.level >= 3) art.fillStyle(0xfff0ba, 0.95).fillRect(-22, -47, 44, 5).fillStyle(def.color, 0.65).fillRect(-15, -52, 30, 4);
+    const level = crisp(this.add.text(-34, -27, building.level >= 3 ? 'Ⅲ' : building.level >= 2 ? 'Ⅱ' : 'Ⅰ', { fontFamily: DISPLAY_FONT, fontStyle: 'bold', fontSize: '12px', color: '#fff0ba', backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
     const name = crisp(this.add.text(0, 50, `${buildingDisplayName(building).toUpperCase()}${building.constructing ? ` ${Math.floor(building.constructionProgress)}%` : ''}`, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#fff0ba', backgroundColor: '#382918ee', padding: { x: 7, y: 4 } })).setOrigin(0.5);
     const container = this.add.container(building.x, building.y, [shadow, halo, art, core, glyph, level, name]).setDepth(7).setSize(120, 104).setInteractive({ useHandCursor: true }).setData('level', building.level);
     container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
@@ -390,6 +391,7 @@ export class WorldScene extends Phaser.Scene {
     state.creatures.forEach((creature) => {
       let view = this.views.get(creature.id);
       if (!view) { view = this.createCreatureView(creature); this.views.set(creature.id, view); }
+      view.container.setVisible(!creature.expeditionId);
       if (view.lastAlive && !creature.alive) { if (state.livingWorld.settings.screenShake) this.cameras.main.shake(400, 0.006); this.game.events.emit('glitch', state.livingWorld.settings.reducedMotion ? 0.25 : 0.9); }
       if (view.lastName !== creature.name) { view.lastName = creature.name; this.voiceCreature(creature, 'rename'); }
       view.lastAlive = creature.alive;
