@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import { BUILDINGS } from '../simulation/building';
 import type { BuildingKind } from '../simulation/worldState';
 import { button, panel } from '../ui/hud';
-import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
+import { scrollMetrics } from '../ui/layout';
+import { crisp, DISPLAY_FONT, truncateText, UI_FONT } from '../ui/typography';
 
 const PAGES = [
   {
@@ -43,8 +44,18 @@ export class GuideScene extends Phaser.Scene {
   private page = 0;
   private titleText!: Phaser.GameObjects.Text;
   private bodyText!: Phaser.GameObjects.Text;
+  private bodyContainer!: Phaser.GameObjects.Container;
   private tabs: Phaser.GameObjects.Container[] = [];
   private searchResult?: { title: string; body: string };
+  private viewport = new Phaser.Geom.Rectangle();
+  private scrollOffset = 0;
+  private scrollMax = 0;
+  private scrollTrack?: Phaser.GameObjects.Rectangle;
+  private scrollThumb?: Phaser.GameObjects.Rectangle;
+  private scrollHint?: Phaser.GameObjects.Text;
+  private dragPointerId?: number;
+  private dragStartY = 0;
+  private dragStartOffset = 0;
 
   constructor() { super('GuideScene'); }
 
@@ -55,6 +66,10 @@ export class GuideScene extends Phaser.Scene {
   create() {
     this.buildLayout();
     this.scale.on('resize', this.handleResize, this);
+    this.input.on('wheel', this.handleWheel, this);
+    this.input.on('pointerdown', this.handlePointerDown, this);
+    this.input.on('pointermove', this.handlePointerMove, this);
+    this.input.on('pointerup', this.handlePointerUp, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
   }
 
@@ -66,40 +81,109 @@ export class GuideScene extends Phaser.Scene {
     const cardHeight = Math.min(680, height - 24);
     const left = width / 2 - cardWidth / 2;
     const top = height / 2 - cardHeight / 2;
+    const compactNavigation = cardWidth < 580;
+    const columns = compactNavigation ? 4 : 7;
+    const rows = Math.ceil(7 / columns);
     this.add.rectangle(width / 2, height / 2, width, height, 0x020604, 0.86).setInteractive();
     panel(this, width / 2, height / 2, cardWidth, cardHeight, 0.99);
     crisp(this.add.text(left + 26, top + 22, 'HABITAT FIELD GUIDE', { fontFamily: DISPLAY_FONT, fontSize: width < 500 ? '16px' : '19px', color: '#91ffd0', letterSpacing: 1.5 }));
     const close = crisp(this.add.text(left + cardWidth - 22, top + 13, '×', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '30px', color: '#a8cdbb' })).setOrigin(1, 0).setInteractive({ useHandCursor: true });
     close.on('pointerup', () => this.scene.stop());
-    const search = button(this, left + cardWidth - 118, top + 38, 150, 30, 'SEARCH INDEX', 0x65c7ff);
+    const compactHeader = cardWidth < 420;
+    const searchWidth = compactHeader ? 86 : 150;
+    const search = button(this, left + cardWidth - 26 - searchWidth / 2, top + 40, searchWidth, 28, compactHeader ? 'SEARCH' : 'SEARCH INDEX', 0x65c7ff);
     search.on('pointerup', () => this.search());
-    this.titleText = crisp(this.add.text(left + 26, top + 65, '', { fontFamily: DISPLAY_FONT, fontSize: '14px', color: '#f7bd62', letterSpacing: 1.2 }));
-    this.bodyText = crisp(this.add.text(left + 26, top + 94, '', { fontFamily: UI_FONT, fontSize: width < 500 ? '12px' : '13px', color: '#e4f7ed', lineSpacing: width < 500 ? 3 : 5, wordWrap: { width: cardWidth - 52 } }));
+    const navigationTop = top + 59;
+    const navigationHeight = rows * 36 + 12;
+    this.add.rectangle(width / 2, navigationTop + navigationHeight / 2, cardWidth - 4, navigationHeight, 0x201d16, 1).setDepth(3);
+    this.add.rectangle(width / 2, navigationTop + navigationHeight, cardWidth - 4, 2, 0xc4a875, 0.48).setDepth(4);
     const labels = ['START', 'NEEDS', 'BUILD', 'CONTROL', 'ROLES', 'MANAGE', 'EXPLORE'];
-    const gap = 5; const tabWidth = (cardWidth - 52 - gap * (labels.length - 1)) / labels.length;
+    const gap = 5; const tabWidth = (cardWidth - 52 - gap * (columns - 1)) / columns;
     labels.forEach((label, index) => {
-      const tab = button(this, left + 26 + tabWidth / 2 + index * (tabWidth + gap), top + cardHeight - 30, tabWidth, 38, label, index === 0 ? 0xf7bd62 : 0x7af6bd);
-      tab.on('pointerup', () => this.showPage(index)); this.tabs.push(tab);
+      const column = index % columns; const row = Math.floor(index / columns);
+      const tab = button(this, left + 26 + tabWidth / 2 + column * (tabWidth + gap), navigationTop + 20 + row * 36, tabWidth, 30, label, index === 0 ? 0xf7bd62 : 0x7af6bd).setDepth(5);
+      tab.on('pointerup', () => { this.searchResult = undefined; this.showPage(index); }); this.tabs.push(tab);
     });
+
+    const titleY = navigationTop + navigationHeight + 15;
+    this.titleText = crisp(this.add.text(left + 26, titleY, '', { fontFamily: DISPLAY_FONT, fontSize: width < 500 ? '12px' : '14px', color: '#f7bd62', letterSpacing: 1.05 })).setDepth(4);
+    const viewportTop = titleY + 28;
+    const viewportBottom = top + cardHeight - 22;
+    this.viewport.setTo(left + 26, viewportTop, cardWidth - 64, Math.max(60, viewportBottom - viewportTop));
+    this.bodyContainer = this.add.container(this.viewport.x, this.viewport.y).setDepth(4);
+    this.bodyText = crisp(this.add.text(0, 0, '', {
+      fontFamily: UI_FONT,
+      fontSize: width < 500 ? '12px' : '13px',
+      color: '#e4f7ed',
+      lineSpacing: width < 500 ? 4 : 6,
+      wordWrap: { width: this.viewport.width - 16, useAdvancedWrap: true }
+    }));
+    this.bodyContainer.add(this.bodyText);
+    const maskShape = this.add.graphics().fillStyle(0xffffff).fillRect(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height).setVisible(false);
+    this.bodyContainer.setMask(maskShape.createGeometryMask());
+    this.scrollTrack = this.add.rectangle(this.viewport.right + 8, this.viewport.centerY, 3, this.viewport.height, 0x756344, 0.35).setDepth(5);
+    this.scrollThumb = this.add.rectangle(this.viewport.right + 8, this.viewport.y, 5, 60, 0xf7bd62, 0.9).setOrigin(0.5, 0).setDepth(6);
+    this.scrollHint = crisp(this.add.text(this.viewport.right - 4, this.viewport.bottom - 4, 'SCROLL ↓', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '8px', color: '#f7bd62', backgroundColor: '#201d16ee', padding: { x: 5, y: 3 } })).setOrigin(1, 1).setDepth(7);
     this.showPage(this.page);
   }
 
   private handleResize = () => this.buildLayout();
 
-  private shutdown() { this.scale.off('resize', this.handleResize, this); }
+  private shutdown() {
+    this.scale.off('resize', this.handleResize, this);
+    this.input.off('wheel', this.handleWheel, this);
+    this.input.off('pointerdown', this.handlePointerDown, this);
+    this.input.off('pointermove', this.handlePointerMove, this);
+    this.input.off('pointerup', this.handlePointerUp, this);
+  }
 
   private showPage(index: number) {
     this.page = index;
     const compact = this.scale.width < 500;
     const densePage = index === 2 || index === 3;
     const page = this.searchResult ?? PAGES[index];
-    this.titleText.setText(page.title);
-    this.bodyText.setFontSize(compact && densePage ? 10 : compact ? 12 : densePage ? 12 : 13).setLineSpacing(compact && densePage ? 1 : compact ? 3 : 5).setText(page.body);
+    this.titleText.setText(truncateText(page.title, 64));
+    this.bodyText.setFontSize(compact && densePage ? 10 : compact ? 12 : densePage ? 12 : 13).setLineSpacing(compact && densePage ? 2 : compact ? 4 : 6).setText(page.body);
+    this.scrollOffset = 0;
+    this.scrollMax = Math.max(0, this.bodyText.height - this.viewport.height + 12);
+    this.applyScroll();
     this.tabs.forEach((tab, tabIndex) => tab.setAlpha(tabIndex === this.page ? 1 : 0.62));
   }
 
+  private applyScroll() {
+    const metrics = scrollMetrics(this.bodyText.height + 12, this.viewport.height, this.scrollOffset);
+    this.scrollOffset = metrics.offset;
+    this.scrollMax = metrics.max;
+    this.bodyContainer.y = this.viewport.y - this.scrollOffset;
+    this.scrollThumb?.setSize(5, metrics.thumbHeight).setPosition(this.viewport.right + 8, this.viewport.y + metrics.thumbOffset);
+    this.scrollTrack?.setVisible(this.scrollMax > 0);
+    this.scrollThumb?.setVisible(this.scrollMax > 0);
+    this.scrollHint?.setVisible(this.scrollMax > 0 && this.scrollOffset < this.scrollMax - 8);
+  }
+
+  private handleWheel(pointer: Phaser.Input.Pointer, _objects: unknown[], _deltaX: number, deltaY: number) {
+    if (!this.viewport.contains(pointer.x, pointer.y) || this.scrollMax <= 0) return;
+    this.scrollOffset += deltaY * 0.55;
+    this.applyScroll();
+  }
+
+  private handlePointerDown(pointer: Phaser.Input.Pointer) {
+    if (!this.viewport.contains(pointer.x, pointer.y) || this.scrollMax <= 0) return;
+    this.dragPointerId = pointer.id; this.dragStartY = pointer.y; this.dragStartOffset = this.scrollOffset;
+  }
+
+  private handlePointerMove(pointer: Phaser.Input.Pointer) {
+    if (this.dragPointerId !== pointer.id || !pointer.isDown) return;
+    this.scrollOffset = this.dragStartOffset + this.dragStartY - pointer.y;
+    this.applyScroll();
+  }
+
+  private handlePointerUp(pointer: Phaser.Input.Pointer) {
+    if (this.dragPointerId === pointer.id) this.dragPointerId = undefined;
+  }
+
   private search() {
-    const query = window.prompt('Search buildings, needs, roles, saves, controls, or colony systems:')?.trim().toLowerCase();
+    const query = window.prompt('Search buildings, needs, roles, saves, controls, or colony systems:')?.trim().toLowerCase().slice(0, 60);
     if (!query) return;
     const matches = PAGES.filter((page) => `${page.title}\n${page.body}`.toLowerCase().includes(query));
     this.searchResult = { title: `SEARCH / ${query.toUpperCase()}`, body: matches.length ? matches.map((page) => `${page.title}\n${page.body}`).join('\n\n────────\n\n') : `No exact entry found for “${query}”. Try: building, hunger, role, research, voice, save, offline, weather, or controls.` };

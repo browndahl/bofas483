@@ -28,7 +28,7 @@ import { gameStore } from '../state/gameStateStore';
 import { saveService } from '../services/saveService';
 import { BuildingMenu } from '../ui/buildingMenu';
 import { button, meter, panel } from '../ui/hud';
-import { CODE_FONT, crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
+import { CODE_FONT, crisp, DISPLAY_FONT, truncateText, UI_FONT } from '../ui/typography';
 
 interface MeterView { fill: Phaser.GameObjects.Rectangle; width: number; target: number }
 
@@ -46,6 +46,9 @@ export class UIScene extends Phaser.Scene {
   private creatureStatus!: Phaser.GameObjects.Text;
   private creaturePersonality!: Phaser.GameObjects.Text;
   private creatureRole!: Phaser.GameObjects.Text;
+  private creatureIntentBack!: Phaser.GameObjects.Rectangle;
+  private creatureIntentLabel!: Phaser.GameObjects.Text;
+  private creatureIntent!: Phaser.GameObjects.Text;
   private creaturePreference!: Phaser.GameObjects.Text;
   private creatureAmbition!: Phaser.GameObjects.Text;
   private creatureSkills!: Phaser.GameObjects.Text;
@@ -101,34 +104,43 @@ export class UIScene extends Phaser.Scene {
     this.objectiveText.setInteractive({ useHandCursor: true }).on('pointerup', () => this.openObjectiveGuide());
 
     this.creaturePanel = this.add.container(0, 0).setDepth(110);
-    this.creaturePanel.add(panel(this, 0, 0, 330, 420));
-    this.creatureName = crisp(this.add.text(-145, -190, 'PIP-01', { fontFamily: DISPLAY_FONT, fontStyle: 'bold', fontSize: '18px', color: '#fff0a8', letterSpacing: 0.35 }));
-    this.creatureStatus = crisp(this.add.text(145, -188, 'ALIVE', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#d8c69a' })).setOrigin(1, 0);
-    this.creatureRole = crisp(this.add.text(-145, -167, '', { fontFamily: DISPLAY_FONT, fontStyle: 'bold', fontSize: '12px', color: '#7af6bd', letterSpacing: 0.3 }));
-    this.creaturePersonality = crisp(this.add.text(-145, -149, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#b7e2ce', wordWrap: { width: 290 }, lineSpacing: 3 }));
-    this.creaturePreference = crisp(this.add.text(-145, -119, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#ead9ae' }));
-    this.creatureAmbition = crisp(this.add.text(-145, -102, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#ffd281', wordWrap: { width: 290 } }));
-    this.creaturePanel.add([this.creatureName, this.creatureStatus, this.creatureRole, this.creaturePersonality, this.creaturePreference, this.creatureAmbition]);
+    this.creaturePanel.add(panel(this, 0, 0, 348, 456, 0.97));
+    this.creatureName = crisp(this.add.text(-152, -207, 'PIP-01', { fontFamily: DISPLAY_FONT, fontStyle: 'bold', fontSize: '18px', color: '#fff0a8', letterSpacing: 0.35, fixedWidth: 176, maxLines: 1 }));
+    this.creatureStatus = crisp(this.add.text(152, -204, 'ALIVE', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#d8c69a', align: 'right', fixedWidth: 126, maxLines: 1 })).setOrigin(1, 0);
+    this.creatureRole = crisp(this.add.text(-152, -181, '', { fontFamily: DISPLAY_FONT, fontStyle: 'bold', fontSize: '11px', color: '#7af6bd', letterSpacing: 0.25, fixedWidth: 304, maxLines: 1 }));
+    this.creaturePersonality = crisp(this.add.text(-152, -159, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#b7e2ce', fixedWidth: 304, maxLines: 1 }));
+    this.creatureIntentBack = this.add.rectangle(0, -118, 304, 52, 0x101e18, 0.98).setStrokeStyle(1, 0x65c7ff, 0.42).setInteractive({ useHandCursor: true });
+    this.creatureIntentLabel = crisp(this.add.text(-140, -139, 'CURRENT INTENT  ·  OPEN FULL CARD', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '8px', color: '#65c7ff', letterSpacing: 0.45 }));
+    this.creatureIntent = crisp(this.add.text(-140, -123, '', { fontFamily: UI_FONT, fontSize: '9px', color: '#e4f7ed', lineSpacing: 1, wordWrap: { width: 280, useAdvancedWrap: true }, maxLines: 2 }));
+    this.creatureIntentBack.on('pointerup', () => {
+      if (this.selected) this.scene.launch('ColonyScene', { page: 'LUMA', creatureId: this.selected.id });
+    });
+    this.creaturePreference = crisp(this.add.text(-152, -85, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#ead9ae', fixedWidth: 304, maxLines: 1 }));
+    this.creatureAmbition = crisp(this.add.text(-152, -68, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#ffd281', fixedWidth: 304, maxLines: 1 }));
+    this.creaturePanel.add([
+      this.creatureName, this.creatureStatus, this.creatureRole, this.creaturePersonality,
+      this.creatureIntentBack, this.creatureIntentLabel, this.creatureIntent, this.creaturePreference, this.creatureAmbition
+    ]);
     const meterDefs = [['hunger', 'NOURISHMENT', 0xf7bd62], ['hygiene', 'CLARITY', 0x65c7ff], ['happiness', 'RESONANCE', 0xbf78ff], ['health', 'INTEGRITY', 0x7af6bd], ['energy', 'CHARGE', 0xff8fcf]] as const;
     meterDefs.forEach(([key, label, color], index) => {
-      const view = meter(this, -145, -78 + index * 29, 290, label, color);
+      const view = meter(this, -152, -42 + index * 27, 304, label, color);
       this.creaturePanel.add([view.title, view.back, view.fill]); this.meters.set(key, view);
     });
-    this.creatureSkills = crisp(this.add.text(-145, 76, '', { fontFamily: CODE_FONT, fontStyle: 'bold', fontSize: '10px', color: '#f0fff7', lineSpacing: 4 }));
+    this.creatureSkills = crisp(this.add.text(-152, 99, '', { fontFamily: CODE_FONT, fontStyle: 'bold', fontSize: '9px', color: '#f0fff7', lineSpacing: 3, fixedWidth: 304, maxLines: 4 }));
     this.creaturePanel.add(this.creatureSkills);
     const labels: Array<[string, string]> = [['FEED +', 'hunger'], ['WASH ≋', 'hygiene'], ['PLAY ✣', 'happiness']];
     labels.forEach(([label, need], index) => {
-      const control = button(this, -98 + index * 98, 178, 88, 42, label, [0xf7bd62, 0x65c7ff, 0xbf78ff][index]);
+      const control = button(this, -104 + index * 104, 199, 94, 40, label, [0xf7bd62, 0x65c7ff, 0xbf78ff][index]);
       control.on('pointerup', () => this.game.events.emit('care', need)); this.creaturePanel.add(control); this.careButtons.push(control);
     });
 
     this.buildingPanel = this.add.container(0, 0).setDepth(111).setVisible(false);
     this.buildingPanel.add(panel(this, 0, 0, 380, 430));
-    this.buildingName = crisp(this.add.text(-165, -193, '', { fontFamily: DISPLAY_FONT, fontSize: '16px', color: '#fff0a8', letterSpacing: 0.7 }));
+    this.buildingName = crisp(this.add.text(-165, -193, '', { fontFamily: DISPLAY_FONT, fontSize: '16px', color: '#fff0a8', letterSpacing: 0.7, fixedWidth: 244, maxLines: 1 }));
     this.buildingLevel = crisp(this.add.text(165, -191, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#7af6bd' })).setOrigin(1, 0);
-    this.buildingDetails = crisp(this.add.text(-165, -160, '', { fontFamily: UI_FONT, fontSize: '10px', color: '#dff5ea', lineSpacing: 4, wordWrap: { width: 330 } }));
-    this.buildingActivity = crisp(this.add.text(-165, -37, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#90c9b0', lineSpacing: 4, wordWrap: { width: 330 } }));
-    this.buildingUpgradeCost = crisp(this.add.text(0, 58, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#f7bd62', align: 'center', wordWrap: { width: 350 }, lineSpacing: 2 })).setOrigin(0.5);
+    this.buildingDetails = crisp(this.add.text(-165, -160, '', { fontFamily: UI_FONT, fontSize: '10px', color: '#dff5ea', lineSpacing: 3, wordWrap: { width: 330, useAdvancedWrap: true }, fixedWidth: 330, fixedHeight: 116, maxLines: 8 }));
+    this.buildingActivity = crisp(this.add.text(-165, -37, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#90c9b0', lineSpacing: 3, wordWrap: { width: 330, useAdvancedWrap: true }, fixedWidth: 330, fixedHeight: 66, maxLines: 4 }));
+    this.buildingUpgradeCost = crisp(this.add.text(0, 58, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#f7bd62', align: 'center', wordWrap: { width: 344, useAdvancedWrap: true }, fixedWidth: 344, fixedHeight: 72, maxLines: 5, lineSpacing: 2 })).setOrigin(0.5);
     this.maintenanceButton = button(this, -91, 119, 166, 36, 'AUTO MAINTENANCE', 0xbf78ff);
     this.repairButton = button(this, 91, 119, 166, 36, 'FUND REPAIR', 0xf7bd62);
     this.upgradeButton = button(this, -91, 176, 166, 42, 'QUALITY PATH', 0x7af6bd);
@@ -161,11 +173,20 @@ export class UIScene extends Phaser.Scene {
   }
   private layout = () => {
     const { width, height } = this.scale; const portrait = width < 650;
+    const portraitObjectiveWidth = Math.max(150, width - 150);
+    const creatureScale = portrait ? Phaser.Math.Clamp((height - 250) / 456, 0.54, 0.82) : 1;
     this.topPanel.setSize(width, 58);
     this.topAccent.setSize(width, 2);
     this.resourcesText.setPosition(width - 18, 14); this.populationText.setPosition(width - 18, 35);
-    this.objectiveText.setPosition(portrait ? 12 : width / 2, portrait ? 212 : 68).setOrigin(portrait ? 0 : 0.5, 0);
-    this.creaturePanel.setPosition(portrait ? width / 2 : 178, portrait ? height - 214 : height - 226).setScale(portrait ? 0.82 : 1);
+    this.objectiveText
+      .setWordWrapWidth(portrait ? portraitObjectiveWidth : Math.min(330, width - 24), true)
+      .setMaxLines(portrait ? 2 : 3)
+      .setFontSize(width < 480 ? 10 : 12)
+      .setPosition(portrait ? 12 : width / 2, portrait ? 156 : 68)
+      .setOrigin(portrait ? 0 : 0.5, 0);
+    this.resourcesText.setFontSize(width < 480 ? 10 : 13);
+    this.populationText.setFontSize(width < 480 ? 9 : 11);
+    this.creaturePanel.setPosition(portrait ? width / 2 : 186, portrait ? height - 18 - 228 * creatureScale : height - 244).setScale(creatureScale);
     this.buildingPanel.setPosition(portrait ? width / 2 : 192, portrait ? height - 214 : height - 230).setScale(portrait ? 0.82 : 1);
     this.buildButton.setPosition(portrait ? width - 84 : width - 92, height - 40);
     (this.children.getByName('profile-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? 68 : width - 230, height - 40);
@@ -186,9 +207,13 @@ export class UIScene extends Phaser.Scene {
     this.state = state;
     this.topPanel.setFillStyle(state.livingWorld.settings.highContrast ? 0x07100d : 0x2c281c, state.livingWorld.settings.highContrast ? 1 : 0.92);
     const living = state.creatures.filter((c) => c.alive);
-    this.resourcesText.setText(`GLOW ${Math.floor(state.resources.glow)}   ·   ALLOY ${Math.floor(state.resources.alloy)}`);
+    this.resourcesText.setText(this.scale.width < 480
+      ? `G ${Math.floor(state.resources.glow)} · A ${Math.floor(state.resources.alloy)}`
+      : `GLOW ${Math.floor(state.resources.glow)}   ·   ALLOY ${Math.floor(state.resources.alloy)}`);
     const silent = state.creatures.filter((creature) => !creature.alive).length;
-    this.populationText.setText(`LIVING ${living.length}  /  SILENT ${silent}  /  ${Math.floor(state.time)}s`);
+    this.populationText.setText(this.scale.width < 480
+      ? `L ${living.length} / S ${silent} / ${Math.floor(state.time)}s`
+      : `LIVING ${living.length}  /  SILENT ${silent}  /  ${Math.floor(state.time)}s`);
     const activeAlerts = state.livingWorld.alerts.filter((alert) => !alert.dismissed).length;
     const speedButton = this.children.getByName('speed-button') as Phaser.GameObjects.Container | null;
     (speedButton?.getByName('button-label') as Phaser.GameObjects.Text | null)?.setText(`${state.livingWorld.settings.paused ? 'PAUSED' : `RUN ${state.livingWorld.settings.simulationSpeed}×`}${activeAlerts ? `  !${activeAlerts}` : ''}`);
@@ -228,14 +253,16 @@ export class UIScene extends Phaser.Scene {
     if (state.chapter === 4 && state.time > 330 && !state.endingId) this.openDialogue('ending');
   }
   private renderCreature(creature: CreatureState) {
-    this.creatureName.setText(creature.name); this.creatureStatus.setText(creature.expeditionId ? `ON EXPEDITION · GEN ${creature.generation}` : creature.alive ? `${creature.task.toUpperCase()} · GEN ${creature.generation}` : 'SILENT').setColor(creature.alive ? '#90c9b0' : '#ff735f');
-    this.creatureRole.setText(`${ROLE_LABELS[creature.assignedRole]}  ·  ${creature.autoRole ? 'SELF-DIRECTED' : 'ASSIGNED'}  ·  STRESS ${Math.round(creature.stress)}%`);
+    this.creatureName.setText(truncateText(creature.name, 20));
+    this.creatureStatus.setText(creature.expeditionId ? `AWAY · GEN ${creature.generation}` : creature.alive ? `${creature.task.toUpperCase()} · GEN ${creature.generation}` : 'SILENT').setColor(creature.alive ? '#90c9b0' : '#ff735f');
+    this.creatureRole.setText(truncateText(`${ROLE_LABELS[creature.assignedRole]}  ·  ${creature.autoRole ? 'SELF-DIRECTED' : 'ASSIGNED'}  ·  STRESS ${Math.round(creature.stress)}%`, 52));
     const strongestBond = Object.entries(creature.bonds).sort((a, b) => b[1] - a[1])[0];
     const bondName = strongestBond ? this.state.creatures.find((candidate) => candidate.id === strongestBond[0])?.name : undefined;
     const reason = explainCreatureAction(this.state, creature);
-    this.creaturePersonality.setText(`${personalityLabels(creature.personality).join(' · ')}${bondName ? `  /  ${relationshipStage(strongestBond[1])} ${bondName} ${Math.round(strongestBond[1])}%` : ''}\nWHY  ${reason.length > 68 ? `${reason.slice(0, 65)}…` : reason}`);
-    this.creaturePreference.setText(`LOVES ${ACTIVITY_LABELS[creature.preferences.favoriteActivity]}  ·  ${BUILDINGS[creature.preferences.favoriteBuilding].name.toUpperCase()}`);
-    this.creatureAmbition.setText(`AMBITION  ${creature.ambition.description.toUpperCase()}  ·  ${Math.min(100, Math.round(creature.ambition.progress / creature.ambition.target * 100))}%`);
+    this.creaturePersonality.setText(truncateText(`${personalityLabels(creature.personality).join(' · ')}${bondName ? `  ·  ${relationshipStage(strongestBond[1])} ${bondName} ${Math.round(strongestBond[1])}%` : ''}`, 68));
+    this.creatureIntent.setText(truncateText(reason, 116));
+    this.creaturePreference.setText(truncateText(`PREFERS  ${ACTIVITY_LABELS[creature.preferences.favoriteActivity]}  ·  ${BUILDINGS[creature.preferences.favoriteBuilding].name.toUpperCase()}`, 62));
+    this.creatureAmbition.setText(truncateText(`AMBITION  ${creature.ambition.description.toUpperCase()}  ·  ${Math.min(100, Math.round(creature.ambition.progress / creature.ambition.target * 100))}%`, 62));
     const skillRows = [0, 2, 4].map((index) => {
       const left = SKILL_KEYS[index]; const right = SKILL_KEYS[index + 1];
       return `${SKILL_LABELS[left].padEnd(8)} L${skillLevel(creature.skills[left])} ${Math.round(creature.skills[left]).toString().padStart(2)}%    ${SKILL_LABELS[right].padEnd(8)} L${skillLevel(creature.skills[right])} ${Math.round(creature.skills[right]).toString().padStart(2)}%`;
@@ -262,7 +289,7 @@ export class UIScene extends Phaser.Scene {
       ?? this.state.creatures.find((creature) => creature.id === building.lastOperatorId);
     const operatorBonus = operator ? Math.round((buildingOperatorEfficiency(operator, building) - 1) * 100) : 0;
     const materials = materialDeliveryRatio(building);
-    this.buildingName.setText(`${def.glyph}  ${buildingDisplayName(building).toUpperCase()}`);
+    this.buildingName.setText(truncateText(`${def.glyph}  ${buildingDisplayName(building).toUpperCase()}`, 38));
     this.buildingLevel.setText(`LEVEL ${building.level} / 3`);
     const currentEffect = building.level >= 3 ? advancedUpgradeDescription(building) : building.level >= 2 ? upgradeDescription(building, building.upgradeBranch ?? 'quality').effect : def.effect;
     this.buildingDetails.setText(`${def.description}\n\nCURRENT EFFECT\n${currentEffect}\nOUTPUT ×${buildingEffectMultiplier(building).toFixed(2)}  ·  POLLUTION ${buildingPollution(building).toFixed(2)}/s\nINFLUENCE ${building.influenceRadius}m  ·  DURABILITY ${Math.round(building.durability)}%`);
@@ -371,7 +398,11 @@ export class UIScene extends Phaser.Scene {
     if (!this.state.dialogueHistory.includes(id) && !this.scene.isActive('DialogueScene')) this.scene.launch('DialogueScene', { id });
   };
   private showToast = (message: string) => {
-    this.toast?.destroy(); this.toast = crisp(this.add.text(this.scale.width / 2, this.scale.height - 84, message, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '13px', color: '#071410', backgroundColor: '#7af6bd', padding: { x: 14, y: 9 } })).setOrigin(0.5).setDepth(500);
+    this.toast?.destroy(); this.toast = crisp(this.add.text(this.scale.width / 2, this.scale.height - 84, truncateText(message, 160), {
+      fontFamily: UI_FONT, fontStyle: 'bold', fontSize: this.scale.width < 500 ? '11px' : '13px', color: '#071410',
+      backgroundColor: '#7af6bd', padding: { x: 14, y: 9 }, align: 'center',
+      wordWrap: { width: Math.min(560, this.scale.width - 40), useAdvancedWrap: true }, maxLines: 3
+    })).setOrigin(0.5).setDepth(500);
     this.tweens.add({ targets: this.toast, alpha: 0, y: this.toast.y - 18, delay: 1600, duration: 500, onComplete: () => { this.toast?.destroy(); this.toast = undefined; } });
   };
   update(_time: number, delta: number) {
