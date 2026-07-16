@@ -40,12 +40,21 @@ export class ColonyScene extends Phaser.Scene {
   private historyFilter: 'all' | 'relationship' | 'story' | 'life' = 'all';
   private managementTab: ManagementTab = 'POLICIES';
   private rosterFilter: CreatureRole | 'all' | 'critical' = 'all';
+  private requestedPage?: Page;
+  private requestedCreatureId?: string;
 
   constructor() { super('ColonyScene'); }
 
+  init(data: { page?: Page; creatureId?: string } = {}) {
+    this.requestedPage = data.page;
+    this.requestedCreatureId = data.creatureId;
+  }
+
   create() {
     this.state = gameStore.get();
-    this.selectedCreatureId = this.state.creatures.find((creature) => creature.alive)?.id;
+    this.page = this.requestedPage ?? 'OVERVIEW';
+    this.selectedCreatureId = this.state.creatures.find((creature) => creature.id === this.requestedCreatureId && creature.alive)?.id
+      ?? this.state.creatures.find((creature) => creature.alive)?.id;
     this.unsubscribe = gameStore.subscribe((state) => { this.state = state; this.renderPage(); });
     this.scale.on('resize', this.rebuild, this);
     this.input.keyboard?.on('keydown-ESC', () => this.scene.stop());
