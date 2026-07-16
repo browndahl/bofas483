@@ -1,4 +1,15 @@
-import { advancedUpgradeCost, BUILDINGS, canAfford, canAffordAdvancedUpgrade, canAffordUpgrade, createBuilding, upgradeCost, validateBuildingPlacement } from '../simulation/building';
+import {
+  advancedUpgradeAvailability,
+  advancedUpgradeCost,
+  beginBuildingProject,
+  BUILDINGS,
+  canAfford,
+  createBuilding,
+  maintenanceCost,
+  upgradeAvailability,
+  upgradeCost,
+  validateBuildingPlacement
+} from '../simulation/building';
 import { expeditionResearchCost, launchExpedition, resolveExpeditionDecision } from '../simulation/expeditions';
 import { resolvePersonalRequest, resolveStoryChoice } from '../simulation/colonyStories';
 import { addJournal, RESEARCH_BRANCHES } from '../simulation/livingWorld';
@@ -12,8 +23,10 @@ class GameStateStore {
   private state = createInitialWorld();
   private listeners = new Set<Listener>();
   private worker?: Worker;
+  private lastActionError = '';
 
   get() { return this.state; }
+  actionError() { return this.lastActionError; }
   subscribe(listener: Listener) { this.listeners.add(listener); listener(this.state); return () => this.listeners.delete(listener); }
   private emit() { this.listeners.forEach((listener) => listener(this.state)); }
   set(state: WorldState, send = true) { this.state = state; if (send) this.worker?.postMessage({ type: 'replace', state }); this.emit(); }
@@ -49,42 +62,67 @@ class GameStateStore {
   }
   place(kind: BuildingKind, x: number, y: number) {
     const next = structuredClone(this.state);
-    if (!this.canPlace(kind, x, y).ok) return false;
+    const placement = this.canPlace(kind, x, y);
+    if (!placement.ok) { this.lastActionError = placement.reason ?? 'Invalid building site'; return false; }
     const cost = BUILDINGS[kind].cost;
     next.resources.glow -= cost.glow; next.resources.alloy -= cost.alloy;
     const building = createBuilding(kind, x, y, next.buildings.length + 1);
-    building.active = false; building.constructionProgress = 0; building.constructing = true;
+    beginBuildingProject(building, 'new', cost);
     next.buildings.push(building);
     next.profile.ambition += kind === 'extractor' ? 2 : 0.5;
     next.profile.sustainability += BUILDINGS[kind].pollution === 0 ? 0.5 : -1;
     appendWorldEvent(next, { type: 'place_building', at: next.time, payload: { kind, x, y } });
-    this.set(next); return true;
+    this.lastActionError = ''; this.set(next); return true;
   }
   upgradeBuilding(id: string, branch: 'quality' | 'capacity' = 'quality') {
     const next = structuredClone(this.state);
     const building = next.buildings.find((candidate) => candidate.id === id);
-    if (!building || !canAffordUpgrade(next.resources, building, branch)) return false;
+    if (!building) { this.lastActionError = 'Building not found'; return false; }
+    const availability = upgradeAvailability(next.resources, next.livingWorld, building, branch);
+    if (!availability.ok) { this.lastActionError = availability.reason ?? 'Upgrade unavailable'; return false; }
     const cost = upgradeCost(building, branch);
     next.resources.glow -= cost.glow; next.resources.alloy -= cost.alloy;
-    building.level = 2; building.upgradeBranch = branch; building.constructionProgress = 65; building.constructing = true; building.active = false;
+    building.level = 2; building.upgradeBranch = branch; beginBuildingProject(building, 'upgrade', cost);
     next.profile.ambition += 1;
     next.profile.sustainability += building.kind === 'extractor' ? 0.6 : 0.25;
     appendWorldEvent(next, { type: 'upgrade_building', at: next.time, payload: { id: building.id, kind: building.kind, level: building.level, branch } });
     addJournal(next, { category: 'milestone', title: `${branch === 'quality' ? 'Quality' : 'Capacity'} upgrade begun`, detail: `${BUILDINGS[building.kind].name} awaits skilled construction.` });
-    this.set(next); return true;
+    this.lastActionError = ''; this.set(next); return true;
   }
   advanceBuilding(id: string) {
     const next = structuredClone(this.state);
     const building = next.buildings.find((candidate) => candidate.id === id);
-    if (!building || !canAffordAdvancedUpgrade(next.resources, next.livingWorld, building)) return false;
+    if (!building) { this.lastActionError = 'Building not found'; return false; }
+    const availability = advancedUpgradeAvailability(next.resources, next.livingWorld, building);
+    if (!availability.ok) { this.lastActionError = availability.reason ?? 'Ascendant evolution unavailable'; return false; }
     const cost = advancedUpgradeCost(building);
     next.resources.glow -= cost.glow; next.resources.alloy -= cost.alloy;
     next.livingWorld.rareResources.memoryCrystal -= cost.memoryCrystal; next.livingWorld.rareResources.wildSeed -= cost.wildSeed;
-    building.level = 3; building.constructionProgress = 60; building.constructing = true; building.active = false;
+    building.level = 3; beginBuildingProject(building, 'ascend', { glow: cost.glow, alloy: cost.alloy });
     next.profile.ambition += 1.5; next.livingWorld.reputation += 5;
     appendWorldEvent(next, { type: 'advanced_upgrade', at: next.time, payload: { id: building.id, kind: building.kind, level: 3 } });
     addJournal(next, { category: 'milestone', title: `Ascendant ${BUILDINGS[building.kind].name} begun`, detail: 'Rare matter is reshaping this facility into its final form.' });
-    this.set(next); return true;
+    this.lastActionError = ''; this.set(next); return true;
+  }
+  setMaintenanceMode(id: string, mode: 'auto' | 'manual') {
+    const next = structuredClone(this.state); const building = next.buildings.find((candidate) => candidate.id === id);
+    if (!building) return false;
+    building.maintenanceMode = mode;
+    appendWorldEvent(next, { type: 'maintenance_mode', at: next.time, payload: { buildingId: id, mode } });
+    this.lastActionError = ''; this.set(next); return true;
+  }
+  requestMaintenance(id: string) {
+    const next = structuredClone(this.state); const building = next.buildings.find((candidate) => candidate.id === id);
+    if (!building || building.constructing) { this.lastActionError = 'Finish construction before maintenance'; return false; }
+    if (building.durability >= 100) { this.lastActionError = 'This facility is already at full durability'; return false; }
+    if (building.maintenanceFunded) { this.lastActionError = 'A maintenance cycle is already funded'; return false; }
+    const cost = maintenanceCost(building);
+    if (next.resources.glow < cost.glow || next.resources.alloy < cost.alloy) {
+      this.lastActionError = `Repairs need ${cost.glow} GLOW and ${cost.alloy} ALLOY`; return false;
+    }
+    next.resources.glow -= cost.glow; next.resources.alloy -= cost.alloy; building.maintenanceFunded = true;
+    appendWorldEvent(next, { type: 'maintenance_funded', at: next.time, payload: { buildingId: id, automatic: false, glow: cost.glow, alloy: cost.alloy } });
+    this.lastActionError = ''; this.set(next); return true;
   }
   assignRole(id: string, role: CreatureRole | 'auto') {
     const next = structuredClone(this.state); const creature = next.creatures.find((candidate) => candidate.id === id && candidate.alive); if (!creature) return false;
@@ -145,7 +183,7 @@ class GameStateStore {
   }
   canPlace(kind: BuildingKind, x: number, y: number) {
     if (!canAfford(this.state.resources, kind)) return { ok: false, reason: 'Not enough GLOW or ALLOY' };
-    return validateBuildingPlacement(this.state.buildings, x, y);
+    return validateBuildingPlacement(this.state.buildings, x, y, kind);
   }
   applyChoice(dialogueId: string, effects: Partial<Record<keyof WorldState['profile'], number>>, ending?: string) {
     const next = structuredClone(this.state);

@@ -37,7 +37,12 @@ const creature = z.object({
 const building = z.object({
   id: z.string().min(1).max(40), kind: z.enum(['nutrient-bed', 'wash-pool', 'resonance-garden', 'nest', 'extractor', 'clinic']),
   x: finite, y: finite, level: z.number().int().min(1).max(3), active: z.boolean(), upgradeBranch: z.enum(['quality', 'capacity']).optional(),
-  durability: finite.min(0).max(100).optional(), constructionProgress: finite.min(0).max(100).optional(), constructing: z.boolean().optional(), influenceRadius: finite.min(50).max(400).optional()
+  durability: finite.min(0).max(100).optional(), constructionProgress: finite.min(0).max(100).optional(), constructing: z.boolean().optional(),
+  constructionKind: z.enum(['new', 'upgrade', 'ascend']).optional(), constructionWork: finite.min(0).max(100).optional(),
+  materialsRequired: z.object({ glow: finite.nonnegative(), alloy: finite.nonnegative() }).optional(),
+  materialsDelivered: z.object({ glow: finite.nonnegative(), alloy: finite.nonnegative() }).optional(),
+  influenceRadius: finite.min(50).max(400).optional(), maintenanceMode: z.enum(['auto', 'manual']).optional(),
+  maintenanceFunded: z.boolean().optional(), lastOperatorId: z.string().max(40).optional()
 });
 const personality = z.object({
   empathy: finite, exploitation: finite, sustainability: finite, curiosity: finite,

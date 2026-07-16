@@ -51,7 +51,9 @@ export function createLivingWorld(): LivingWorldState {
     challenges: [
       { id: 'gentle-day', title: 'Gentle Day', description: 'Keep every living Luma above 50 integrity.', progress: 0, target: 1, complete: false },
       { id: 'living-network', title: 'Living Network', description: 'Form five close friendships.', progress: 0, target: 5, complete: false },
-      { id: 'master-builder', title: 'Master Builder', description: 'Complete three facility upgrades.', progress: 0, target: 3, complete: false }
+      { id: 'master-builder', title: 'Master Builder', description: 'Complete three facility upgrades.', progress: 0, target: 3, complete: false },
+      { id: 'specialized-habitat', title: 'Specialized Habitat', description: 'Complete three upgrades on the same Quality or Capacity path.', progress: 0, target: 3, complete: false },
+      { id: 'six-fold-network', title: 'Six-Fold Network', description: 'Upgrade one of every facility type.', progress: 0, target: 6, complete: false }
     ],
     settings: {
       muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, textScale: 1.1, highContrast: false, colorBlind: false,
@@ -59,7 +61,7 @@ export function createLivingWorld(): LivingWorldState {
       subtitles: true, tutorial: true, alertLevel: 'all'
     },
     telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 },
-    saveVersion: 4
+    saveVersion: 5
   };
 }
 
@@ -79,11 +81,14 @@ export function ensureLivingWorld(world: WorldState) {
   world.livingWorld.lastRequestDay ??= 0;
   world.livingWorld.lastStoryDay ??= 0;
   world.livingWorld.lastGroupActivityAt ??= 0;
-  if (!world.livingWorld.challenges?.length) world.livingWorld.challenges = defaults.challenges;
+  world.livingWorld.challenges ??= [];
+  defaults.challenges.forEach((challenge) => {
+    if (!world.livingWorld.challenges.some((candidate) => candidate.id === challenge.id)) world.livingWorld.challenges.push({ ...challenge });
+  });
   if ((world.livingWorld.saveVersion ?? 2) < 3) {
     world.livingWorld.settings.textScale = Math.max(1.1, world.livingWorld.settings.textScale);
   }
-  world.livingWorld.saveVersion = 4;
+  world.livingWorld.saveVersion = 5;
 }
 
 export function addJournal(world: WorldState, entry: Omit<JournalEntry, 'id' | 'at'> & { id?: string; at?: number }) {
@@ -115,7 +120,12 @@ function updateChallenges(world: WorldState) {
   const values: Record<string, number> = {
     'gentle-day': world.livingWorld.day >= 2 && living.length > 0 && living.every((creature) => creature.needs.health >= 50) ? 1 : 0,
     'living-network': relationshipPairs(living, 50),
-    'master-builder': world.buildings.filter((building) => building.level >= 2).length
+    'master-builder': world.buildings.filter((building) => building.level >= 2 && !building.constructing).length,
+    'specialized-habitat': Math.max(
+      world.buildings.filter((building) => building.level >= 2 && !building.constructing && building.upgradeBranch === 'quality').length,
+      world.buildings.filter((building) => building.level >= 2 && !building.constructing && building.upgradeBranch === 'capacity').length
+    ),
+    'six-fold-network': new Set(world.buildings.filter((building) => building.level >= 2 && !building.constructing).map((building) => building.kind)).size
   };
   world.livingWorld.challenges.forEach((challenge) => {
     challenge.progress = Math.min(challenge.target, values[challenge.id] ?? challenge.progress);
@@ -135,7 +145,8 @@ function updateAlerts(world: WorldState) {
   const blocked = living.find((creature) => creature.stuckTimer > 1.2);
   const request = world.livingWorld.personalRequests.find((item) => item.status === 'active');
   const story = world.livingWorld.storyEvents.find((item) => item.status === 'decision');
-  const managed = new Set(['silent-colony', 'food-shortage', 'illness', 'loneliness', 'overcrowding', 'blocked-route']);
+  const worn = world.buildings.find((building) => !building.constructing && building.durability < 35 && !building.maintenanceFunded);
+  const managed = new Set(['silent-colony', 'food-shortage', 'illness', 'loneliness', 'overcrowding', 'blocked-route', 'maintenance-shortage']);
   const active = new Set<string>();
   if (!living.length) active.add('silent-colony');
   if (hungry) active.add('food-shortage');
@@ -143,6 +154,7 @@ function updateAlerts(world: WorldState) {
   if (lonely) active.add('loneliness');
   if (queues.length) active.add('overcrowding');
   if (blocked) active.add('blocked-route');
+  if (worn) active.add('maintenance-shortage');
   if (request) active.add(`personal-request:${request.id}`);
   if (story) active.add(`story-decision:${story.id}`);
   world.livingWorld.alerts = world.livingWorld.alerts.filter((alert) => {
@@ -161,6 +173,7 @@ function updateAlerts(world: WorldState) {
     addAlert(world, 'overcrowding', 'warning', 'Facility queue is blocking care', `${building.kind.replaceAll('-', ' ')} has 3+ waiting Luma. Add a capacity upgrade or a second facility.`, { buildingId: building.id, actionLabel: 'SHOW BUILDING' });
   }
   if (blocked) addAlert(world, 'blocked-route', 'warning', `${blocked.name} cannot reach the destination`, `${blocked.name}'s ${blocked.task} route is blocked or overcrowded. Move the obstruction, add facility capacity, or let automatic path recovery retry.`, { creatureId: blocked.id, actionLabel: 'SHOW LUMA' });
+  if (worn) addAlert(world, 'maintenance-shortage', worn.durability <= 10 ? 'critical' : 'warning', `${worn.kind.replaceAll('-', ' ')} needs maintenance`, `Durability is ${Math.round(worn.durability)}%. Fund repairs from the building panel or enable automatic maintenance.`, { buildingId: worn.id, actionLabel: 'SHOW BUILDING' });
   if (request) {
     const creature = world.creatures.find((candidate) => candidate.id === request.creatureId);
     addAlert(world, `personal-request:${request.id}`, 'info', request.title, `${creature?.name ?? 'A Luma'} is waiting for an answer in COLONY → SOCIAL.`, { creatureId: request.creatureId, actionLabel: 'OPEN SOCIAL' });
@@ -279,5 +292,10 @@ export function ensureBuildingLife(building: BuildingState) {
   building.durability ??= 100;
   building.constructionProgress ??= building.active ? 100 : 0;
   building.constructing ??= building.constructionProgress < 100;
+  building.constructionWork ??= building.constructionProgress;
+  building.materialsRequired ??= { glow: 0, alloy: 0 };
+  building.materialsDelivered ??= building.constructing ? { glow: 0, alloy: 0 } : { ...building.materialsRequired };
   building.influenceRadius ??= 130;
+  building.maintenanceMode ??= 'auto';
+  building.maintenanceFunded ??= false;
 }

@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { chooseTask, decayNeeds, reproductionReady } from '../src/simulation/creature';
 import { findPath } from '../src/simulation/pathfinding';
 import { spreadPollution, tickWorld } from '../src/simulation/simulation';
-import { buildingCapacity, buildingEffectMultiplier, buildingPollution, createBuilding, validateBuildingPlacement } from '../src/simulation/building';
+import {
+  beginBuildingProject,
+  buildingCapacity,
+  buildingEffectMultiplier,
+  buildingPollution,
+  createBuilding,
+  materialDeliveryRatio,
+  validateBuildingPlacement
+} from '../src/simulation/building';
 import { buildNavigationPath, isNavigationBlocked } from '../src/simulation/navigation';
 import { createCreaturePersonality, setBond } from '../src/simulation/personality';
 import { ROLE_SKILL, SKILL_KEYS, trainSkill } from '../src/simulation/colonyLife';
@@ -212,6 +220,42 @@ describe('environment and navigation', () => {
       expect(buildingEffectMultiplier(building)).toBeGreaterThan(1);
       expect(buildingPollution(building)).toBeLessThanOrEqual(basePollution);
     });
+  });
+  it('requires builders to deliver materials and complete skilled construction work', () => {
+    let world = createInitialWorld(41); world.livingWorld.research.technology = 2;
+    const building = createBuilding('nutrient-bed', 760, 472, 1);
+    beginBuildingProject(building, 'new', { glow: 25, alloy: 8 }); world.buildings.push(building);
+    world.creatures[0].assignedRole = 'builder'; world.creatures[0].skills.building = 60;
+    for (let index = 0; index < 4 && world.buildings[0].constructionProgress === 0; index++) world = tickWorld(world, 1);
+    expect(world.buildings[0].constructionProgress).toBeGreaterThan(0);
+    expect(materialDeliveryRatio(world.buildings[0])).toBeGreaterThan(0);
+    expect(world.buildings[0].constructionWork).toBeGreaterThan(0);
+    for (let index = 0; index < 30 && world.buildings[0].constructing; index++) world = tickWorld(world, 1);
+    expect(world.buildings[0].constructing).toBe(false);
+    expect(world.buildings[0].active).toBe(true);
+    expect(world.events.some((event) => event.type === 'construction_complete')).toBe(true);
+  });
+  it('funds automatic maintenance and lets a Builder restore durability', () => {
+    let world = createInitialWorld(42); world.resources = { glow: 100, alloy: 100 };
+    const building = createBuilding('wash-pool', 760, 472, 1); building.durability = 54; world.buildings.push(building);
+    world.creatures[0].assignedRole = 'builder'; world.creatures[0].skills.building = 60;
+    const resourcesBefore = { ...world.resources };
+    world = tickWorld(world, 1);
+    expect(world.resources.glow).toBeLessThan(resourcesBefore.glow);
+    expect(world.resources.alloy).toBeLessThan(resourcesBefore.alloy);
+    expect(world.events.some((event) => event.type === 'maintenance_funded')).toBe(true);
+    for (let index = 0; index < 20 && world.buildings[0].maintenanceFunded; index++) world = tickWorld(world, 1);
+    expect(world.buildings[0].durability).toBeGreaterThan(90);
+    expect(world.buildings[0].maintenanceFunded).toBe(false);
+    expect(world.events.some((event) => event.type === 'maintenance_complete')).toBe(true);
+  });
+  it('respects manual maintenance mode without silently spending resources', () => {
+    let world = createInitialWorld(43); world.resources = { glow: 100, alloy: 100 };
+    const building = createBuilding('clinic', 760, 472, 1); building.durability = 30; building.maintenanceMode = 'manual'; world.buildings.push(building);
+    const resourcesBefore = { ...world.resources };
+    world = tickWorld(world, 1);
+    expect(world.resources).toEqual(resourcesBefore);
+    expect(world.buildings[0].maintenanceFunded).toBe(false);
   });
 });
 

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BUILDINGS, buildingCapacity, buildingDisplayName } from '../simulation/building';
+import { BUILDINGS, buildingCapacity, buildingDisplayName, materialDeliveryRatio } from '../simulation/building';
 import { personalityLabels } from '../simulation/personality';
 import { contextualVocalization, voicePitch, type CreatureMood, type VoiceContext } from '../simulation/vocalization';
 import type { BuildingKind, BuildingState, CreatureState, WorldState } from '../simulation/worldState';
@@ -193,8 +193,10 @@ export class WorldScene extends Phaser.Scene {
     const def = BUILDINGS[kind];
     const base = this.add.image(0, 0, 'building-base').setTint(def.color).setAlpha(0.45);
     const influence = this.add.circle(0, 0, 130, def.color, 0.055).setStrokeStyle(2, def.color, 0.32);
+    const clearance = this.add.circle(0, 0, 112, 0x000000, 0).setStrokeStyle(2, 0x7af6bd, 0.7);
     const glyph = crisp(this.add.text(0, 0, def.glyph, { fontFamily: UI_FONT, fontSize: '28px', color: '#071410' })).setOrigin(0.5);
-    this.placementGhost = this.add.container(800, 500, [influence, base, glyph]).setDepth(20);
+    const status = crisp(this.add.text(0, 154, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#eafff4', backgroundColor: '#1f2a20ee', padding: { x: 8, y: 5 }, align: 'center' })).setOrigin(0.5);
+    this.placementGhost = this.add.container(800, 500, [influence, clearance, base, glyph, status]).setDepth(20);
     const pointer = this.input.activePointer;
     const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
     this.placementGhost.setPosition(point.x, point.y);
@@ -202,9 +204,14 @@ export class WorldScene extends Phaser.Scene {
   };
   private updatePlacementGhost(x: number, y: number) {
     if (!this.placementGhost || !this.placementKind) return;
-    const base = this.placementGhost.getAt(1) as Phaser.GameObjects.Image;
+    const clearance = this.placementGhost.getAt(1) as Phaser.GameObjects.Arc;
+    const base = this.placementGhost.getAt(2) as Phaser.GameObjects.Image;
+    const status = this.placementGhost.getAt(4) as Phaser.GameObjects.Text;
     const placement = gameStore.canPlace(this.placementKind, x, y);
     base.setTint(placement.ok ? BUILDINGS[this.placementKind].color : 0xff735f).setAlpha(placement.ok ? 0.55 : 0.38);
+    clearance.setStrokeStyle(2, placement.ok ? 0x7af6bd : 0xff735f, 0.8);
+    status.setText(`${placement.ok ? 'CLEAR' : 'BLOCKED'} · ${placement.reason ?? ''}\nINFLUENCE · ${placement.influenceSummary ?? '0 nearby facilities'}`)
+      .setColor(placement.ok ? '#baffdc' : '#ffb3a6');
   }
   private cancelPlacement(showMessage = true) {
     if (!this.placementGhost && !this.placementKind) return;
@@ -325,6 +332,13 @@ export class WorldScene extends Phaser.Scene {
       if (!sad && n.happiness > 72) view.eyes.fillStyle(0xffb0c8, 0.55).fillRect(-20, 7, 6, 3).fillRect(14, 7, 6, 3);
       if (dirty) view.eyes.fillStyle(0x5f542d, 1).fillRect(-22, 12, 5, 5).fillRect(18, -16, 4, 4).fillRect(14, 19, 3, 3);
       if (hungry) view.eyes.fillStyle(0xffd56b, 1).fillRect(-7, 17, 14, 3).fillRect(-10, 14, 3, 3).fillRect(7, 14, 3, 3);
+      if (creature.task === 'construct') {
+        view.body.fillStyle(0x3a2918, 1).fillRect(-25, 12, 18, 15);
+        view.body.fillStyle(0xd4a65f, 1).fillRect(-22, 9, 16, 15).fillStyle(0xffdda0, 0.85).fillRect(-19, 11, 10, 3);
+      }
+      if (creature.task === 'maintain') {
+        view.body.fillStyle(0x65c7ff, 1).fillRect(16, 10, 5, 16).fillRect(11, 15, 15, 5);
+      }
     } else {
       view.eyes.fillStyle(0x25301f, 1).fillRect(-13, 14, 9, 3).fillRect(-10, 11, 3, 9).fillRect(4, 14, 9, 3).fillRect(7, 11, 3, 9);
     }
@@ -369,8 +383,23 @@ export class WorldScene extends Phaser.Scene {
     const core = this.add.rectangle(0, 3, 7, 7, def.color, 0.95).setBlendMode(Phaser.BlendModes.ADD);
     const glyph = crisp(this.add.text(33, -24, def.glyph, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: Phaser.Display.Color.IntegerToColor(def.color).rgba, backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
     if (building.constructing) { art.fillStyle(0xf7bd62, 0.95).fillRect(-44, -36, 88 * building.constructionProgress / 100, 5); }
-    if (building.level >= 2) art.fillStyle(def.color, 0.9).fillRect(-36, -38, 9, 9).fillRect(27, -38, 9, 9).fillStyle(0xfff0ba, 0.9).fillRect(-33, -35, 3, 3).fillRect(30, -35, 3, 3);
+    if (building.level >= 2 && building.upgradeBranch === 'quality') {
+      art.fillStyle(def.color, 0.9).fillRect(-36, -38, 9, 9).fillRect(27, -38, 9, 9)
+        .fillStyle(0xfff0ba, 0.9).fillRect(-33, -35, 3, 3).fillRect(30, -35, 3, 3)
+        .fillStyle(def.color, 0.72).fillRect(-4, -48, 8, 18);
+    }
+    if (building.level >= 2 && building.upgradeBranch === 'capacity') {
+      art.fillStyle(0x6e5331, 1).fillRect(-56, 4, 16, 25).fillRect(40, 4, 16, 25)
+        .fillStyle(def.color, 0.82).fillRect(-53, -3, 10, 10).fillRect(43, -3, 10, 10);
+    }
     if (building.level >= 3) art.fillStyle(0xfff0ba, 0.95).fillRect(-22, -47, 44, 5).fillStyle(def.color, 0.65).fillRect(-15, -52, 30, 4);
+    if (building.constructing) {
+      const delivery = materialDeliveryRatio(building);
+      art.lineStyle(3, 0xd4a65f, 0.8).lineBetween(-48, 32, -48, -42).lineBetween(48, 32, 48, -42).lineBetween(-48, -42, 48, -42);
+      const crates = Math.max(1, Math.floor(delivery * 4));
+      for (let index = 0; index < crates; index++) art.fillStyle(0xb87a3e, 1).fillRect(-43 + index * 17, 21, 14, 12).fillStyle(0xf0c77a, 0.8).fillRect(-40 + index * 17, 23, 8, 3);
+    }
+    if (!building.constructing && building.durability < 55) art.fillStyle(0xff735f, 0.9).fillRect(-44, -34, 10, 10).fillStyle(0xffd4c9, 1).fillRect(-41, -31, 4, 4);
     const level = crisp(this.add.text(-34, -27, building.level >= 3 ? 'Ⅲ' : building.level >= 2 ? 'Ⅱ' : 'Ⅰ', { fontFamily: DISPLAY_FONT, fontStyle: 'bold', fontSize: '12px', color: '#fff0ba', backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
     const name = crisp(this.add.text(0, 50, `${buildingDisplayName(building).toUpperCase()}${building.constructing ? ` ${Math.floor(building.constructionProgress)}%` : ''}`, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#fff0ba', backgroundColor: '#382918ee', padding: { x: 7, y: 4 } })).setOrigin(0.5);
     const container = this.add.container(building.x, building.y, [shadow, halo, art, core, glyph, level, name]).setDepth(7).setSize(120, 104).setInteractive({ useHandCursor: true }).setData('level', building.level);
@@ -400,11 +429,14 @@ export class WorldScene extends Phaser.Scene {
     });
     state.buildings.forEach((building) => {
       const existing = this.buildingViews.get(building.id);
-      const signature = `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}`;
+      const signature = `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}:${Math.floor(materialDeliveryRatio(building) * 5)}:${Math.floor(building.durability / 10)}:${building.maintenanceFunded}`;
       if (existing && existing.getData('signature') !== signature) { existing.destroy(); this.buildingViews.delete(building.id); }
       if (!this.buildingViews.has(building.id)) this.buildingViews.set(building.id, this.createBuildingView(building));
     });
-    this.buildingViews.forEach((container, id) => { const building = state.buildings.find((item) => item.id === id); if (building) container.setData('signature', `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}`); });
+    this.buildingViews.forEach((container, id) => {
+      const building = state.buildings.find((item) => item.id === id);
+      if (building) container.setData('signature', `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}:${Math.floor(materialDeliveryRatio(building) * 5)}:${Math.floor(building.durability / 10)}:${building.maintenanceFunded}`);
+    });
     this.drawPaths(state);
     this.drawPollution(state);
   }

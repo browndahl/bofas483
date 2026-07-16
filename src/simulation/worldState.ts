@@ -4,6 +4,9 @@ import { chooseCreatureRole, createCreatureAmbition, createCreaturePreferences, 
 export type NeedKey = 'hunger' | 'hygiene' | 'happiness' | 'health' | 'energy';
 export type TaskType = 'wander' | 'eat' | 'bathe' | 'play' | 'sleep' | 'work' | 'heal' | 'socialize' | 'comfort' | 'construct' | 'maintain' | 'celebrate' | 'argue' | 'dead';
 export type BuildingKind = 'nutrient-bed' | 'wash-pool' | 'resonance-garden' | 'nest' | 'extractor' | 'clinic';
+export type UpgradeBranch = 'quality' | 'capacity';
+export type ConstructionKind = 'new' | 'upgrade' | 'ascend';
+export type MaintenanceMode = 'auto' | 'manual';
 export type CreatureRole = 'forager' | 'caretaker' | 'healer' | 'builder' | 'researcher' | 'explorer';
 export type SkillKey = 'foraging' | 'caregiving' | 'healing' | 'building' | 'research' | 'exploration';
 export type CreatureSkills = Record<SkillKey, number>;
@@ -81,11 +84,18 @@ export interface BuildingState {
   y: number;
   level: number;
   active: boolean;
-  upgradeBranch?: 'quality' | 'capacity';
+  upgradeBranch?: UpgradeBranch;
   durability: number;
   constructionProgress: number;
   constructing: boolean;
+  constructionKind?: ConstructionKind;
+  constructionWork: number;
+  materialsRequired: Resources;
+  materialsDelivered: Resources;
   influenceRadius: number;
+  maintenanceMode: MaintenanceMode;
+  maintenanceFunded: boolean;
+  lastOperatorId?: string;
 }
 export interface Resources { glow: number; alloy: number }
 export interface Personality {
@@ -256,7 +266,7 @@ export function createInitialWorld(seed = Date.now()): WorldState {
       personalRequests: [], storyEvents: [], lastRequestDay: 0, lastStoryDay: 0, lastGroupActivityAt: 0,
       challenges: [],
       settings: { muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, textScale: 1.1, highContrast: false, colorBlind: false, reducedMotion: false, screenShake: true, lowPower: false, quality: 'high', offlineLimitMinutes: 15, simulationSpeed: 1, paused: false, subtitles: true, tutorial: true, alertLevel: 'all' },
-      telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 }, saveVersion: 4
+      telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 }, saveVersion: 5
     }
   };
 }

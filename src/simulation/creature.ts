@@ -32,7 +32,7 @@ export function chooseTask(creature: CreatureState, buildings: BuildingState[]):
   if (creature.needs.energy < 30) return 'sleep';
   if (creature.needs.happiness < 42) return 'play';
   if (buildings.some((building) => building.constructing || building.constructionProgress < 100) && creature.needs.energy > 45 && creature.needs.hunger > 52) return 'construct';
-  if (buildings.some((building) => building.durability < 45) && creature.personality.diligence > 0.48 && creature.needs.energy > 40) return 'maintain';
+  if (buildings.some((building) => building.maintenanceFunded) && (creature.assignedRole === 'builder' || creature.personality.diligence > 0.48) && creature.needs.energy > 40) return 'maintain';
   if (buildings.some((b) => b.kind === 'extractor' && b.active)) return 'work';
   return 'wander';
 }
