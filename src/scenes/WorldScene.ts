@@ -259,6 +259,7 @@ export class WorldScene extends Phaser.Scene {
     if (creature.task === 'construct') return 'Carrying materials to construction';
     if (creature.task === 'maintain') return 'Repairing a worn facility';
     if (creature.task === 'argue') return `Arguing with ${partner?.name ?? 'someone'}`;
+    if (creature.task === 'celebrate') return 'Sharing a colony moment ✦';
     const dominant = personalityLabels(creature.personality, 1)[0];
     return dominant === 'CURIOUS' ? 'What lies beyond the trees?' : dominant === 'WARM' ? 'Is anyone lonely?' : dominant === 'SOCIAL' ? 'I hope someone visits' : dominant === 'STEADY' ? 'One task at a time' : 'I can endure this';
   }
@@ -271,7 +272,7 @@ export class WorldScene extends Phaser.Scene {
     }
     const serial = Number(creature.id.replace(/\D/g, '')) || 1;
     const urgent = Math.min(creature.needs.hunger, creature.needs.hygiene, creature.needs.happiness, creature.needs.health, creature.needs.energy) < 30;
-    const social = creature.task === 'socialize' || creature.task === 'comfort';
+    const social = ['socialize', 'comfort', 'argue', 'celebrate'].includes(creature.task);
     const partnerSerial = creature.destinationCreatureId ? Number(creature.destinationCreatureId.replace(/\D/g, '')) || serial : serial;
     const socialSpeaker = serial <= partnerSerial;
     const periodic = (Math.floor(this.state.time / 7) + serial) % 7 === 0;
@@ -327,8 +328,8 @@ export class WorldScene extends Phaser.Scene {
     } else {
       view.eyes.fillStyle(0x25301f, 1).fillRect(-13, 14, 9, 3).fillRect(-10, 11, 3, 9).fillRect(4, 14, 9, 3).fillRect(7, 11, 3, 9);
     }
-    const status = !creature.alive ? '' : sick ? '☣' : hungry ? '!' : dirty ? '≋' : sad ? '·' : tired ? 'z' : creature.task === 'comfort' ? '+' : creature.task === 'socialize' ? '♡' : '';
-    const statusColor = sick ? '#ff735f' : hungry ? '#f7bd62' : dirty ? '#65c7ff' : creature.task === 'comfort' ? '#7af6bd' : '#bf78ff';
+    const status = !creature.alive ? '' : sick ? '☣' : hungry ? '!' : dirty ? '≋' : sad ? '·' : tired ? 'z' : creature.task === 'comfort' ? '+' : creature.task === 'socialize' ? '♡' : creature.task === 'argue' ? '×' : creature.task === 'celebrate' ? '✦' : '';
+    const statusColor = sick ? '#ff735f' : hungry ? '#f7bd62' : dirty ? '#65c7ff' : creature.task === 'comfort' ? '#7af6bd' : creature.task === 'argue' ? '#ff735f' : creature.task === 'celebrate' ? '#f7bd62' : '#bf78ff';
     view.status.setText(status).setVisible(Boolean(status)).setBackgroundColor(statusColor);
   }
   private createBuildingView(building: BuildingState) {
@@ -411,17 +412,18 @@ export class WorldScene extends Phaser.Scene {
     this.relationshipGraphics.clear();
     const rendered = new Set<string>();
     for (const creature of this.state.creatures) {
-      if (!creature.alive || !creature.destinationCreatureId || !['socialize', 'comfort'].includes(creature.task)) continue;
+      if (!creature.alive || !creature.destinationCreatureId || !['socialize', 'comfort', 'argue'].includes(creature.task)) continue;
       const partner = this.creaturesById.get(creature.destinationCreatureId);
       const from = this.views.get(creature.id); const to = partner ? this.views.get(partner.id) : undefined;
       if (!partner?.alive || !from || !to) continue;
       const key = [creature.id, partner.id].sort().join(':'); if (rendered.has(key)) continue; rendered.add(key);
       const active = creature.socialTimer > 0;
-      this.relationshipGraphics.lineStyle(active ? 3 : 2, creature.task === 'comfort' ? 0x7af6bd : 0xffa6d8, active ? 0.52 : 0.2);
+      const relationshipColor = creature.task === 'comfort' ? 0x7af6bd : creature.task === 'argue' ? 0xff735f : 0xffa6d8;
+      this.relationshipGraphics.lineStyle(active ? 3 : 2, relationshipColor, active ? 0.52 : 0.2);
       this.relationshipGraphics.lineBetween(from.container.x, from.container.y - 4, to.container.x, to.container.y - 4);
       if (active) {
         const midpointX = (from.container.x + to.container.x) / 2; const midpointY = (from.container.y + to.container.y) / 2;
-        this.relationshipGraphics.fillStyle(creature.task === 'comfort' ? 0x7af6bd : 0xffa6d8, 0.8).fillCircle(midpointX, midpointY - 5, 3);
+        this.relationshipGraphics.fillStyle(relationshipColor, 0.8).fillCircle(midpointX, midpointY - 5, creature.task === 'argue' ? 4 : 3);
       }
     }
   }
@@ -532,7 +534,7 @@ export class WorldScene extends Phaser.Scene {
     if (time - this.lastAmbientVoiceAt < (this.state.livingWorld.settings.lowPower ? 12000 : 5200)) return;
     const visible = this.state.creatures.filter((creature) => creature.alive && this.views.get(creature.id)?.container.visible);
     const critical = visible.find((creature) => Math.min(...Object.values(creature.needs)) < 18);
-    const social = visible.find((creature) => ['socialize', 'comfort'].includes(creature.task) && creature.socialTimer > 0);
+    const social = visible.find((creature) => ['socialize', 'comfort', 'celebrate'].includes(creature.task) && (creature.socialTimer > 0 || creature.task === 'celebrate'));
     const sleeper = visible.find((creature) => creature.task === 'sleep' && creature.isBeingServed);
     const player = visible.find((creature) => creature.task === 'play' && creature.isBeingServed);
     const speaker = critical ?? social ?? sleeper ?? player; if (!speaker) return;
@@ -562,14 +564,16 @@ export class WorldScene extends Phaser.Scene {
       view.container.x += dx * smoothing; view.container.y += dy * smoothing;
       const phase = Number(creature.id.replace(/\D/g, '')) * 0.71;
       const motionScale = this.state.livingWorld.settings.reducedMotion ? 0.25 : 1;
-      view.actor.y = creature.alive ? Math.sin(time * 0.004 + phase) * 2.5 * motionScale : 0;
-      view.actor.rotation = Phaser.Math.Linear(view.actor.rotation, creature.alive ? Phaser.Math.Clamp(dx * 0.002, -0.11, 0.11) : 0, smoothing * 0.5);
+      const socialBounce = creature.task === 'celebrate' ? Math.abs(Math.sin(time * 0.009 + phase)) * 8 : creature.task === 'comfort' ? Math.sin(time * 0.005 + phase) * 3 : 0;
+      view.actor.y = creature.alive ? Math.sin(time * 0.004 + phase) * 2.5 * motionScale - socialBounce * motionScale : 0;
+      const expressionTilt = creature.task === 'argue' ? Math.sin(time * 0.018 + phase) * 0.12 : creature.task === 'socialize' ? Math.sin(time * 0.006 + phase) * 0.05 : 0;
+      view.actor.rotation = Phaser.Math.Linear(view.actor.rotation, creature.alive ? Phaser.Math.Clamp(dx * 0.002 + expressionTilt, -0.16, 0.16) : 0, smoothing * 0.5);
       const pulse = 1 + Math.sin(time * 0.003 + phase) * 0.055;
       view.aura.setScale(pulse); view.shadow.setScale(1 - (pulse - 1) * 1.5, 1);
       view.thought.y = -69 - (Number(creature.id.replace(/\D/g, '')) % 2) * 8 + Math.sin(time * 0.0025 + phase) * 2;
       view.thought.alpha = 0.9 + (Math.sin(time * 0.003 + phase) + 1) * 0.05;
       const inView = view.container.x > camera.worldView.left - 100 && view.container.x < camera.worldView.right + 100 && view.container.y > camera.worldView.top - 100 && view.container.y < camera.worldView.bottom + 100;
-      view.container.setVisible(inView);
+      view.container.setVisible(inView && !creature.expeditionId);
       view.label.setVisible(inView && ((camera.zoom > 0.68 && this.state.creatures.length < 90) || creature.id === this.selectedId));
     });
     this.drawRelationships();

@@ -120,7 +120,8 @@ function comfortScore(actor: CreatureState, candidate: CreatureState): number {
   return distress * (0.65 + actor.personality.empathy * 0.7) + (actor.bonds[candidate.id] ?? 0) * 0.08;
 }
 
-function buildSocialPlans(creatures: CreatureState[], buildings: BuildingState[], time: number): Map<string, SocialPlan> {
+function buildSocialPlans(world: WorldState): Map<string, SocialPlan> {
+  const { creatures, buildings, time } = world;
   const plans = new Map<string, SocialPlan>();
   const byId = new Map(creatures.map((creature) => [creature.id, creature]));
   const reserved = new Set<string>();
@@ -172,7 +173,11 @@ function buildSocialPlans(creatures: CreatureState[], buildings: BuildingState[]
       if (score > bestScore) { bestScore = score; partner = candidate; }
     }
     if (partner) {
-      const conflict = socialCompatibility(actor, partner) < 0.24;
+      const key = [actor.id, partner.id].sort().join(':');
+      const latestRelationshipEvent = [...world.events].reverse().find((event) => ['relationship_conflict', 'relationship_reconciled'].includes(event.type) && event.payload.pair === key);
+      const readyToReconcile = latestRelationshipEvent?.type === 'relationship_conflict' && time - latestRelationshipEvent.at > 30
+        && actor.personality.empathy + partner.personality.empathy > 0.9;
+      const conflict = socialCompatibility(actor, partner) < 0.24 && !readyToReconcile;
       pair(actor, partner, conflict ? 'argue' : 'socialize', conflict ? 'argue' : 'socialize');
     }
   }
@@ -264,6 +269,13 @@ function applySocialInteractions(world: WorldState, seconds: number) {
     if (arguing) {
       actor.needs.happiness = Math.max(0, actor.needs.happiness - seconds * 1.6); partner.needs.happiness = Math.max(0, partner.needs.happiness - seconds * 1.6);
       actor.stress = Math.min(100, actor.stress + seconds * 1.2); partner.stress = Math.min(100, partner.stress + seconds * 1.2);
+      const existing = [...world.events].reverse().find((event) => event.type === 'relationship_conflict' && event.payload.pair === pairKey && world.time - event.at < 45);
+      if (!existing) {
+        const event = { type: 'relationship_conflict', at: world.time, payload: { a: actor.id, b: partner.id, pair: pairKey } };
+        appendWorldEvent(world, event); remember(actor, event, `Argued with ${partner.name} and felt misunderstood.`, -1); remember(partner, event, `Argued with ${actor.name} and felt misunderstood.`, -1);
+        actor.currentConcern = `Upset after arguing with ${partner.name}`; partner.currentConcern = `Upset after arguing with ${actor.name}`;
+        addJournal(world, { category: 'relationship', title: `${actor.name} and ${partner.name} clash`, detail: 'Their incompatible needs became an argument. Time, empathy, or a colony story can help them reconcile.' });
+      }
     } else if (comforting) {
       const recipient = actor.task === 'comfort' ? partner : actor;
       recipient.needs.happiness = Math.min(100, recipient.needs.happiness + seconds * (3.8 + Math.max(actor.personality.empathy, partner.personality.empathy) * 2.2));
@@ -272,6 +284,13 @@ function applySocialInteractions(world: WorldState, seconds: number) {
       const restoration = seconds * (2.4 + (actor.personality.sociability + partner.personality.sociability) * 1.2);
       actor.needs.happiness = Math.min(100, actor.needs.happiness + restoration);
       partner.needs.happiness = Math.min(100, partner.needs.happiness + restoration);
+      const conflict = [...world.events].reverse().find((event) => event.type === 'relationship_conflict' && event.payload.pair === pairKey);
+      const reconciled = [...world.events].reverse().find((event) => event.type === 'relationship_reconciled' && event.payload.pair === pairKey);
+      if (conflict && (!reconciled || reconciled.at < conflict.at) && world.time - conflict.at > 30) {
+        const event = { type: 'relationship_reconciled', at: world.time, payload: { a: actor.id, b: partner.id, pair: pairKey } };
+        appendWorldEvent(world, event); remember(actor, event, `${partner.name} returned to talk after their argument.`, 1); remember(partner, event, `${actor.name} returned to talk after their argument.`, 1);
+        addJournal(world, { category: 'relationship', title: `${actor.name} and ${partner.name} reconcile`, detail: 'They returned to the same path, listened, and rebuilt part of their bond.' });
+      }
     }
     trainAndCelebrate(world, actor, actor.task, seconds, 1.2);
     trainAndCelebrate(world, partner, partner.task, seconds, 1.2);
@@ -346,8 +365,13 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
     return creature;
   });
 
-  const socialPlans = buildSocialPlans(next.creatures, next.buildings, next.time);
-  const taskPlans = new Map(next.creatures.filter((creature) => creature.alive && !creature.expeditionId).map((creature) => [creature.id, socialPlans.get(creature.id)?.task ?? chooseTask(creature, next.buildings)]));
+  const socialPlans = buildSocialPlans(next);
+  const groupActivity = next.livingWorld.groupActivity;
+  const groupMembers = new Set(groupActivity?.creatureIds ?? []);
+  const taskPlans = new Map(next.creatures.filter((creature) => creature.alive && !creature.expeditionId).map((creature) => {
+    const urgent = Math.min(creature.needs.health, creature.needs.hunger, creature.needs.hygiene, creature.needs.energy) < 34;
+    return [creature.id, groupMembers.has(creature.id) && !urgent ? 'celebrate' : socialPlans.get(creature.id)?.task ?? chooseTask(creature, next.buildings)] as const;
+  }));
   const serviceAssignments = buildServiceAssignments(next.creatures, taskPlans, buildingsByKind, next.buildings);
   buildProjectAssignments(next.creatures, taskPlans, next.buildings).forEach((assignment, id) => serviceAssignments.set(id, assignment));
   const socialGrid = new SpatialGrid<CreatureState>(128); socialGrid.rebuild(next.creatures.filter((creature) => creature.alive && !creature.expeditionId));
@@ -372,6 +396,12 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
       if (creature.destinationCreatureId || SOCIAL_TASKS.has(creature.task) || creature.socialTarget) clearSocialState(creature);
       creature.destinationBuildingId = service.building.id; creature.destinationCreatureId = undefined;
       creature.target = { ...service.target };
+    } else if (task === 'celebrate' && groupActivity) {
+      if (creature.destinationCreatureId || creature.socialTarget) clearSocialState(creature);
+      const index = groupActivity.creatureIds.indexOf(creature.id);
+      const angle = Math.PI * 2 * index / Math.max(1, groupActivity.creatureIds.length);
+      creature.destinationBuildingId = undefined; creature.destinationCreatureId = undefined;
+      creature.target = { x: groupActivity.center.x + Math.cos(angle) * 68, y: groupActivity.center.y + Math.sin(angle) * 44 };
     } else {
       if (creature.destinationCreatureId || SOCIAL_TASKS.has(creature.task) || creature.socialTarget) clearSocialState(creature);
       creature.destinationBuildingId = undefined; creature.destinationCreatureId = undefined;

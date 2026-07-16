@@ -3,6 +3,7 @@ import { advancedUpgradeCost, advancedUpgradeDescription, BUILDINGS, buildingCap
 import { ACTIVITY_LABELS, ROLE_LABELS, SKILL_KEYS, SKILL_LABELS, skillLevel } from '../simulation/colonyLife';
 import { personalityLabels } from '../simulation/personality';
 import { relationshipStage } from '../simulation/livingWorld';
+import { explainCreatureAction } from '../simulation/colonyStories';
 import { OBJECTIVES } from '../simulation/progression';
 import type { BuildingState, CreatureState, WorldState } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
@@ -204,7 +205,8 @@ export class UIScene extends Phaser.Scene {
     this.creatureRole.setText(`${ROLE_LABELS[creature.assignedRole]}  ·  ${creature.autoRole ? 'SELF-DIRECTED' : 'ASSIGNED'}  ·  STRESS ${Math.round(creature.stress)}%`);
     const strongestBond = Object.entries(creature.bonds).sort((a, b) => b[1] - a[1])[0];
     const bondName = strongestBond ? this.state.creatures.find((candidate) => candidate.id === strongestBond[0])?.name : undefined;
-    this.creaturePersonality.setText(`${personalityLabels(creature.personality).join(' · ')}${bondName ? `  /  ${relationshipStage(strongestBond[1])} ${bondName} ${Math.round(strongestBond[1])}%` : ''}\nCONCERN  ${creature.currentConcern}`);
+    const reason = explainCreatureAction(this.state, creature);
+    this.creaturePersonality.setText(`${personalityLabels(creature.personality).join(' · ')}${bondName ? `  /  ${relationshipStage(strongestBond[1])} ${bondName} ${Math.round(strongestBond[1])}%` : ''}\nWHY  ${reason.length > 68 ? `${reason.slice(0, 65)}…` : reason}`);
     this.creaturePreference.setText(`LOVES ${ACTIVITY_LABELS[creature.preferences.favoriteActivity]}  ·  ${BUILDINGS[creature.preferences.favoriteBuilding].name.toUpperCase()}`);
     this.creatureAmbition.setText(`AMBITION  ${creature.ambition.description.toUpperCase()}  ·  ${Math.min(100, Math.round(creature.ambition.progress / creature.ambition.target * 100))}%`);
     const skillRows = [0, 2, 4].map((index) => {

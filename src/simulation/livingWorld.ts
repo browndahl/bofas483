@@ -1,6 +1,7 @@
 import type { BuildingState, CreatureState, GameEvent, JournalEntry, LivingWorldState, RegionId, ResearchBranch, WorldState } from './worldState';
 import { appendWorldEvent } from './worldState';
 import { updateExpeditions } from './expeditions';
+import { updateColonyStories } from './colonyStories';
 
 export const RESEARCH_BRANCHES: Record<ResearchBranch, { name: string; description: string; bonus: string }> = {
   care: { name: 'CARE', description: 'Gentler recovery and stronger offline safety.', bonus: '+5% care efficiency per level' },
@@ -42,6 +43,11 @@ export function createLivingWorld(): LivingWorldState {
     lastDailyEventDay: 0,
     alerts: [],
     journal: [{ id: 'awakening', at: 0, category: 'discovery', title: 'Habitat 483 awakens', detail: 'Pip-01 answered the first signal.' }],
+    personalRequests: [],
+    storyEvents: [],
+    lastRequestDay: 0,
+    lastStoryDay: 0,
+    lastGroupActivityAt: 0,
     challenges: [
       { id: 'gentle-day', title: 'Gentle Day', description: 'Keep every living Luma above 50 integrity.', progress: 0, target: 1, complete: false },
       { id: 'living-network', title: 'Living Network', description: 'Form five close friendships.', progress: 0, target: 5, complete: false },
@@ -53,7 +59,7 @@ export function createLivingWorld(): LivingWorldState {
       subtitles: true, tutorial: true, alertLevel: 'all'
     },
     telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 },
-    saveVersion: 3
+    saveVersion: 4
   };
 }
 
@@ -68,11 +74,16 @@ export function ensureLivingWorld(world: WorldState) {
   world.livingWorld.expeditions ??= [];
   world.livingWorld.alerts ??= [];
   world.livingWorld.journal ??= defaults.journal;
+  world.livingWorld.personalRequests ??= [];
+  world.livingWorld.storyEvents ??= [];
+  world.livingWorld.lastRequestDay ??= 0;
+  world.livingWorld.lastStoryDay ??= 0;
+  world.livingWorld.lastGroupActivityAt ??= 0;
   if (!world.livingWorld.challenges?.length) world.livingWorld.challenges = defaults.challenges;
   if ((world.livingWorld.saveVersion ?? 2) < 3) {
     world.livingWorld.settings.textScale = Math.max(1.1, world.livingWorld.settings.textScale);
-    world.livingWorld.saveVersion = 3;
   }
+  world.livingWorld.saveVersion = 4;
 }
 
 export function addJournal(world: WorldState, entry: Omit<JournalEntry, 'id' | 'at'> & { id?: string; at?: number }) {
@@ -82,12 +93,12 @@ export function addJournal(world: WorldState, entry: Omit<JournalEntry, 'id' | '
   if (world.livingWorld.journal.length > 120) world.livingWorld.journal.splice(0, world.livingWorld.journal.length - 120);
 }
 
-function addAlert(world: WorldState, id: string, severity: 'info' | 'warning' | 'critical', title: string, detail: string) {
+function addAlert(world: WorldState, id: string, severity: 'info' | 'warning' | 'critical', title: string, detail: string, target: Partial<Pick<WorldState['livingWorld']['alerts'][number], 'creatureId' | 'buildingId' | 'actionLabel'>> = {}) {
   const preference = world.livingWorld.settings.alertLevel;
   if ((preference === 'critical' && severity !== 'critical') || (preference === 'important' && severity === 'info')) return;
   const existing = world.livingWorld.alerts.find((alert) => alert.id === id);
-  if (existing) { existing.at = world.time; existing.detail = detail; return; }
-  world.livingWorld.alerts.push({ id, severity, title, detail, at: world.time, dismissed: false });
+  if (existing) { existing.at = world.time; existing.detail = detail; Object.assign(existing, target); return; }
+  world.livingWorld.alerts.push({ id, severity, title, detail, at: world.time, dismissed: false, ...target });
   if (world.livingWorld.alerts.length > 20) world.livingWorld.alerts.shift();
 }
 
@@ -121,19 +132,40 @@ function updateAlerts(world: WorldState) {
   const sick = living.filter((creature) => creature.needs.health < 45).length;
   const lonely = living.filter((creature) => creature.needs.happiness < 30).length;
   const queues = world.buildings.filter((building) => world.creatures.filter((creature) => creature.destinationBuildingId === building.id && !creature.isBeingServed).length >= 3);
-  const managed = new Set(['silent-colony', 'food-shortage', 'illness', 'loneliness', 'overcrowding']);
+  const blocked = living.find((creature) => creature.stuckTimer > 1.2);
+  const request = world.livingWorld.personalRequests.find((item) => item.status === 'active');
+  const story = world.livingWorld.storyEvents.find((item) => item.status === 'decision');
+  const managed = new Set(['silent-colony', 'food-shortage', 'illness', 'loneliness', 'overcrowding', 'blocked-route']);
   const active = new Set<string>();
   if (!living.length) active.add('silent-colony');
   if (hungry) active.add('food-shortage');
   if (sick) active.add('illness');
   if (lonely) active.add('loneliness');
   if (queues.length) active.add('overcrowding');
-  world.livingWorld.alerts = world.livingWorld.alerts.filter((alert) => !managed.has(alert.id) || active.has(alert.id));
+  if (blocked) active.add('blocked-route');
+  if (request) active.add(`personal-request:${request.id}`);
+  if (story) active.add(`story-decision:${story.id}`);
+  world.livingWorld.alerts = world.livingWorld.alerts.filter((alert) => {
+    const managedAlert = managed.has(alert.id) || alert.id.startsWith('personal-request:') || alert.id.startsWith('story-decision:');
+    return !managedAlert || active.has(alert.id);
+  });
   if (!living.length) addAlert(world, 'silent-colony', 'critical', 'The habitat is silent', 'Use Recovery Options to restore a living signal without erasing colony history.');
-  if (hungry) addAlert(world, 'food-shortage', hungry > 2 ? 'critical' : 'warning', 'Nourishment shortage', `${hungry} Luma need a Dew Loom or direct feeding.`);
-  if (sick) addAlert(world, 'illness', sick > 2 ? 'critical' : 'warning', 'Integrity warning', `${sick} Luma need treatment or cleaner ground.`);
-  if (lonely) addAlert(world, 'loneliness', 'warning', 'The chorus is fading', `${lonely} Luma need play, companionship, or a Chime Grove.`);
-  if (queues.length) addAlert(world, 'overcrowding', 'warning', 'Facility overcrowding', `${queues.length} facilities have long queues. Add capacity or another building.`);
+  const hungriest = [...living].sort((a, b) => a.needs.hunger - b.needs.hunger)[0];
+  const sickest = [...living].sort((a, b) => a.needs.health - b.needs.health)[0];
+  const loneliest = [...living].sort((a, b) => a.needs.happiness - b.needs.happiness)[0];
+  if (hungry && hungriest) addAlert(world, 'food-shortage', hungry > 2 ? 'critical' : 'warning', `${hungriest.name} needs nourishment`, `${hungriest.name} is at ${Math.round(hungriest.needs.hunger)}%. Build a Dew Loom or select them and FEED.`, { creatureId: hungriest.id, actionLabel: 'SHOW LUMA' });
+  if (sick && sickest) addAlert(world, 'illness', sick > 2 ? 'critical' : 'warning', `${sickest.name} needs treatment`, `${sickest.name} has ${Math.round(sickest.needs.health)}% integrity. Build a Mending Prism or reduce nearby pollution.`, { creatureId: sickest.id, actionLabel: 'SHOW LUMA' });
+  if (lonely && loneliest) addAlert(world, 'loneliness', 'warning', `${loneliest.name} feels alone`, `${loneliest.name} has ${Math.round(loneliest.needs.happiness)}% resonance. Add a Chime Grove, PLAY, or answer their social request.`, { creatureId: loneliest.id, actionLabel: 'SHOW LUMA' });
+  if (queues.length) {
+    const building = queues[0];
+    addAlert(world, 'overcrowding', 'warning', 'Facility queue is blocking care', `${building.kind.replaceAll('-', ' ')} has 3+ waiting Luma. Add a capacity upgrade or a second facility.`, { buildingId: building.id, actionLabel: 'SHOW BUILDING' });
+  }
+  if (blocked) addAlert(world, 'blocked-route', 'warning', `${blocked.name} cannot reach the destination`, `${blocked.name}'s ${blocked.task} route is blocked or overcrowded. Move the obstruction, add facility capacity, or let automatic path recovery retry.`, { creatureId: blocked.id, actionLabel: 'SHOW LUMA' });
+  if (request) {
+    const creature = world.creatures.find((candidate) => candidate.id === request.creatureId);
+    addAlert(world, `personal-request:${request.id}`, 'info', request.title, `${creature?.name ?? 'A Luma'} is waiting for an answer in COLONY → SOCIAL.`, { creatureId: request.creatureId, actionLabel: 'OPEN SOCIAL' });
+  }
+  if (story) addAlert(world, `story-decision:${story.id}`, 'info', story.title, `Stage ${story.stage}/2 is waiting in COLONY → SOCIAL. Your choice changes bonds and colony history.`, { actionLabel: 'OPEN SOCIAL' });
   world.livingWorld.alerts = world.livingWorld.alerts.filter((alert) => world.time - alert.at < 180 || !alert.dismissed);
 }
 
@@ -193,6 +225,7 @@ export function updateLivingWorld(world: WorldState, seconds: number) {
     }
   });
   dailyEvent(world);
+  updateColonyStories(world, seconds);
   if (Math.floor(world.time) % 5 === 0) { updateAlerts(world); updateChallenges(world); }
 }
 

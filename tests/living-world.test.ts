@@ -7,6 +7,7 @@ import { tickWorld } from '../src/simulation/simulation';
 import { contextualVocalization } from '../src/simulation/vocalization';
 import { createInitialWorld, makeCreature } from '../src/simulation/worldState';
 import { parseWorldState } from '../src/simulation/worldSchema';
+import { relationshipTone, resolvePersonalRequest, resolveStoryChoice, updateColonyStories } from '../src/simulation/colonyStories';
 
 describe('living world progression', () => {
   it('advances day, season, reputation, research, and regional permits', () => {
@@ -47,6 +48,45 @@ describe('living world progression', () => {
     expect(buildingCapacity(building)).toBe(base + 2); expect(buildingEffectMultiplier(building)).toBeGreaterThan(1.5);
   });
 
+  it('creates named personal requests with persistent choices', () => {
+    const world = createInitialWorld(31); world.creatures.push(makeCreature('c2', 540, 500)); world.time = 240; world.livingWorld.day = 2;
+    updateColonyStories(world, 1);
+    const request = world.livingWorld.personalRequests[0];
+    expect(request.title).toContain(world.creatures.find((creature) => creature.id === request.creatureId)?.name);
+    const glow = world.resources.glow;
+    expect(resolvePersonalRequest(world, request.id, 'help')).toBe(true);
+    expect(world.resources.glow).toBe(glow - 8); expect(request.status).toBe('resolved');
+  });
+
+  it('turns needs and requests into actionable named alerts', () => {
+    const world = createInitialWorld(34); world.creatures.push(makeCreature('c2', 540, 500)); world.time = 240;
+    world.creatures[0].needs.hunger = 18;
+    updateLivingWorld(world, 1);
+    const hunger = world.livingWorld.alerts.find((alert) => alert.id === 'food-shortage');
+    const request = world.livingWorld.alerts.find((alert) => alert.id.startsWith('personal-request:'));
+    expect(hunger?.title).toContain(world.creatures[0].name); expect(hunger?.creatureId).toBe(world.creatures[0].id);
+    expect(request?.actionLabel).toBe('OPEN SOCIAL');
+  });
+
+  it('resolves colony stories through two consequential stages', () => {
+    const world = createInitialWorld(32); world.creatures.push(makeCreature('c2', 540, 500)); world.time = 480; world.livingWorld.day = 3;
+    updateColonyStories(world, 1);
+    const story = world.livingWorld.storyEvents[0];
+    expect(resolveStoryChoice(world, story.id, 'gentle')).toBe(true); expect(story.stage).toBe(2); expect(story.status).toBe('decision');
+    expect(resolveStoryChoice(world, story.id, 'bold')).toBe(true); expect(story.status).toBe('resolved');
+    expect(world.events.some((event) => event.type === 'story_resolved')).toBe(true);
+  });
+
+  it('runs safe group activities and classifies family and Lifebonds', () => {
+    const world = createInitialWorld(33); world.creatures.push(makeCreature('c2', 540, 500), makeCreature('c3', 580, 500)); world.time = 90;
+    updateColonyStories(world, 1);
+    expect(world.livingWorld.groupActivity?.creatureIds).toHaveLength(3);
+    world.creatures[1].parentId = world.creatures[0].id;
+    expect(relationshipTone(world, world.creatures[0], world.creatures[1])).toBe('FAMILY');
+    world.creatures[1].parentId = undefined; world.creatures[0].bonds.c2 = 90; world.creatures[1].bonds.c1 = 90;
+    expect(relationshipTone(world, world.creatures[0], world.creatures[1])).toBe('LIFEBOND');
+  });
+
   it('disables offline simulation when the player selects a zero-minute limit', () => {
     const world = createInitialWorld(5); world.livingWorld.settings.offlineLimitMinutes = 0;
     const result = advanceOfflineWorld(world, 3600);
@@ -62,6 +102,9 @@ describe('living world progression', () => {
     expect(migrated?.livingWorld.settings.voiceVolume).toBeGreaterThan(0);
     expect(migrated?.livingWorld.settings.textScale).toBeGreaterThanOrEqual(1.1);
     expect(migrated?.livingWorld.expeditions).toEqual([]);
+    expect(migrated?.livingWorld.personalRequests).toEqual([]);
+    expect(migrated?.livingWorld.storyEvents).toEqual([]);
+    expect(migrated?.livingWorld.saveVersion).toBe(4);
     expect(migrated?.creatures[0].history.length).toBeGreaterThan(0);
     expect(migrated?.creatures[0].voiceStyle).toBeTruthy();
   });

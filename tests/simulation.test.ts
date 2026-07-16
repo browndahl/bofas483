@@ -12,6 +12,7 @@ import { appendWorldEvent, createInitialWorld, makeCreature, MAX_EVENT_HISTORY }
 import { parseWorldState } from '../src/simulation/worldSchema';
 import { recoverSilentColony } from '../src/simulation/recovery';
 import { resolveObjectiveProgress } from '../src/simulation/progression';
+import { updateColonyStories } from '../src/simulation/colonyStories';
 
 describe('creature simulation', () => {
   it('decays needs at their configured rates', () => {
@@ -108,6 +109,33 @@ describe('creature simulation', () => {
     const next = tickWorld(world, 0.2);
     expect(next.creatures[0].task).toBe('sleep');
     expect(next.creatures[0].destinationCreatureId).toBeUndefined();
+  });
+  it('lets urgent care interrupt a scheduled colony celebration', () => {
+    const world = createInitialWorld(41);
+    world.creatures.push(makeCreature('c2', 540, 500), makeCreature('c3', 580, 500));
+    world.time = 90; updateColonyStories(world, 1);
+    world.creatures[0].needs.hunger = 20;
+    const next = tickWorld(world, 0.2);
+    expect(next.creatures[0].task).toBe('eat');
+    expect(next.creatures.slice(1).some((creature) => creature.task === 'celebrate')).toBe(true);
+  });
+  it('records arguments and later reconciliation as persistent relationship history', () => {
+    const world = createInitialWorld(42); const partner = makeCreature('c2', 785, 520); world.creatures.push(partner);
+    world.creatures.forEach((creature, index) => {
+      creature.age = 10; creature.socialCooldown = 0; creature.task = 'argue'; creature.socialTimer = 3;
+      creature.destinationCreatureId = index === 0 ? 'c2' : 'c1'; creature.socialTarget = { x: creature.x, y: creature.y };
+      creature.personality.empathy = 1;
+    });
+    let next = world;
+    for (let index = 0; index < 12 && !next.events.some((event) => event.type === 'relationship_conflict'); index++) next = tickWorld(next, 0.2);
+    expect(next.events.some((event) => event.type === 'relationship_conflict')).toBe(true);
+    next.time += 31;
+    next.creatures.forEach((creature, index) => {
+      creature.socialCooldown = 0; creature.task = 'socialize'; creature.socialTimer = 3;
+      creature.destinationCreatureId = index === 0 ? 'c2' : 'c1'; creature.socialTarget = { x: creature.x, y: creature.y };
+    });
+    next = tickWorld(next, 0.2);
+    expect(next.events.some((event) => event.type === 'relationship_reconciled')).toBe(true);
   });
   it('dissolves triangular pursuits into exclusive reciprocal pairs', () => {
     const world = createInitialWorld(1);
