@@ -143,7 +143,7 @@ export interface ExpeditionState {
   choice?: ExpeditionChoice;
 }
 export interface GameSettings {
-  muted: boolean; voiceVolume: number; ambienceVolume: number; textScale: number; highContrast: boolean; colorBlind: boolean;
+  muted: boolean; voiceVolume: number; ambienceVolume: number; musicVolume: number; textScale: number; highContrast: boolean; colorBlind: boolean;
   reducedMotion: boolean; screenShake: boolean; lowPower: boolean; quality: 'low' | 'medium' | 'high'; offlineLimitMinutes: number;
   simulationSpeed: 1 | 2 | 4; paused: boolean; subtitles: boolean; tutorial: boolean; alertLevel: 'critical' | 'important' | 'all';
 }
@@ -265,8 +265,8 @@ export function createInitialWorld(seed = Date.now()): WorldState {
       alerts: [], journal: [{ id: 'awakening', at: 0, category: 'discovery', title: 'Habitat 483 awakens', detail: 'Pip-01 answered the first signal.' }],
       personalRequests: [], storyEvents: [], lastRequestDay: 0, lastStoryDay: 0, lastGroupActivityAt: 0,
       challenges: [],
-      settings: { muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, textScale: 1.1, highContrast: false, colorBlind: false, reducedMotion: false, screenShake: true, lowPower: false, quality: 'high', offlineLimitMinutes: 15, simulationSpeed: 1, paused: false, subtitles: true, tutorial: true, alertLevel: 'all' },
-      telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 }, saveVersion: 5
+      settings: { muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, musicVolume: 0.3, textScale: 1.1, highContrast: false, colorBlind: false, reducedMotion: false, screenShake: true, lowPower: false, quality: 'high', offlineLimitMinutes: 15, simulationSpeed: 1, paused: false, subtitles: true, tutorial: true, alertLevel: 'all' },
+      telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 }, saveVersion: 6
     }
   };
 }

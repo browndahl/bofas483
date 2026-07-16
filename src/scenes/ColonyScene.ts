@@ -317,7 +317,7 @@ export class ColonyScene extends Phaser.Scene {
   private renderSettings() {
     const { width } = this.dimensions(); const settings = this.state.livingWorld.settings;
     const toggles: Array<[keyof GameSettings, string, string]> = [
-      ['muted', 'CREATURE VOICES', settings.muted ? 'MUTED' : 'ON'], ['subtitles', 'VOCAL SUBTITLES', settings.subtitles ? 'ON' : 'OFF'],
+      ['muted', 'ALL AUDIO', settings.muted ? 'MUTED' : 'ON'], ['subtitles', 'VOCAL SUBTITLES', settings.subtitles ? 'ON' : 'OFF'],
       ['reducedMotion', 'REDUCED MOTION', settings.reducedMotion ? 'ON' : 'OFF'], ['screenShake', 'SCREEN FEEDBACK', settings.screenShake ? 'ON' : 'OFF'],
       ['highContrast', 'HIGH CONTRAST', settings.highContrast ? 'ON' : 'OFF'], ['colorBlind', 'COLOR-SAFE NEEDS', settings.colorBlind ? 'ON' : 'OFF'],
       ['lowPower', 'LOW-POWER MODE', settings.lowPower ? 'ON' : 'OFF'], ['tutorial', 'CONTEXTUAL GUIDE', settings.tutorial ? 'ON' : 'OFF']
@@ -328,21 +328,23 @@ export class ColonyScene extends Phaser.Scene {
       this.addText(x, y - 8, label, compact ? 9 : 11, '#dff5ea');
       this.addButton(compact ? width - 49 : x + width * 0.37, y, compact ? 92 : 100, status, status === 'ON' ? 0x7af6bd : 0xff8fcf, () => gameStore.updateSetting(key, !settings[key] as never));
     });
-    const sectionY = compact ? 335 : 260; const infoY = sectionY + 32;
+    const sectionY = compact ? 305 : 260; const infoY = sectionY + 32;
     this.addHeading(0, sectionY, 'AUDIO / DISPLAY / SIMULATION');
-    this.addText(0, infoY, `VOICE ${Math.round(settings.voiceVolume * 100)}%  ·  TEXT ${Math.round(settings.textScale * 100)}%  ·  ${settings.quality.toUpperCase()}\nOFFLINE ${settings.offlineLimitMinutes} MIN  ·  ${settings.paused ? 'PAUSED' : `${settings.simulationSpeed}× SPEED`}`, compact ? 9 : 11, '#e4f7ed');
+    this.addText(0, infoY, `VOICE ${Math.round(settings.voiceVolume * 100)}%  ·  AMBIENCE ${Math.round(settings.ambienceVolume * 100)}%  ·  MUSIC ${Math.round(settings.musicVolume * 100)}%\nTEXT ${Math.round(settings.textScale * 100)}%  ·  ${settings.quality.toUpperCase()}  ·  OFFLINE ${settings.offlineLimitMinutes} MIN`, compact ? 8 : 10, '#e4f7ed');
     const left = compact ? width * 0.22 : width * 0.48; const right = compact ? width * 0.66 : width * 0.65; const controlWidth = compact ? 138 : 140;
     this.addButton(left, sectionY + 88, controlWidth, 'VOICE −', 0x65c7ff, () => gameStore.updateSetting('voiceVolume', Math.max(0, settings.voiceVolume - 0.1)));
     this.addButton(right, sectionY + 88, controlWidth, 'VOICE +', 0x65c7ff, () => gameStore.updateSetting('voiceVolume', Math.min(1, settings.voiceVolume + 0.1)));
-    this.addButton(left, sectionY + 130, controlWidth, 'TEXT −', 0xf7bd62, () => gameStore.updateSetting('textScale', Math.max(0.85, settings.textScale - 0.1)));
-    this.addButton(right, sectionY + 130, controlWidth, 'TEXT +', 0xf7bd62, () => gameStore.updateSetting('textScale', Math.min(1.4, settings.textScale + 0.1)));
-    this.addButton(left, sectionY + 172, controlWidth, `QUALITY ${settings.quality.toUpperCase()}`, 0xbf78ff, () => gameStore.updateSetting('quality', settings.quality === 'high' ? 'medium' : settings.quality === 'medium' ? 'low' : 'high'));
-    this.addButton(right, sectionY + 172, controlWidth, `OFFLINE ${settings.offlineLimitMinutes}`, 0xbf78ff, () => gameStore.updateSetting('offlineLimitMinutes', settings.offlineLimitMinutes >= 60 ? 0 : settings.offlineLimitMinutes === 0 ? 15 : settings.offlineLimitMinutes + 15));
-    this.addButton(left, sectionY + 214, controlWidth, settings.paused ? 'RESUME' : 'PAUSE', 0x7af6bd, () => gameStore.togglePause());
-    this.addButton(right, sectionY + 214, controlWidth, `SPEED ${settings.simulationSpeed}×`, 0x7af6bd, () => gameStore.cycleSpeed());
-    this.addButton(width * 0.27, sectionY + 260, compact ? 164 : 190, `ALERTS ${settings.alertLevel.toUpperCase()}`, 0x65c7ff, () => gameStore.updateSetting('alertLevel', settings.alertLevel === 'all' ? 'important' : settings.alertLevel === 'important' ? 'critical' : 'all'));
-    this.addButton(width * 0.73, sectionY + 260, compact ? 164 : 190, 'FULLSCREEN', 0xff8fcf, () => this.scale.isFullscreen ? this.scale.stopFullscreen() : this.scale.startFullscreen());
-    this.addText(0, sectionY + 292, 'KEYS  SPACE pause  ·  1/2/3 speed  ·  P photo  ·  G guide  ·  ESC close', compact ? 8 : 10, '#90c9b0', width);
+    this.addButton(left, sectionY + 126, controlWidth, `AMBIENCE ${Math.round(settings.ambienceVolume * 100)}%`, 0x7af6bd, () => gameStore.updateSetting('ambienceVolume', settings.ambienceVolume >= 0.8 ? 0 : settings.ambienceVolume + 0.2));
+    this.addButton(right, sectionY + 126, controlWidth, `MUSIC ${Math.round(settings.musicVolume * 100)}%`, 0xff8fcf, () => gameStore.updateSetting('musicVolume', settings.musicVolume >= 0.8 ? 0 : settings.musicVolume + 0.2));
+    this.addButton(left, sectionY + 164, controlWidth, 'TEXT −', 0xf7bd62, () => gameStore.updateSetting('textScale', Math.max(0.85, settings.textScale - 0.1)));
+    this.addButton(right, sectionY + 164, controlWidth, 'TEXT +', 0xf7bd62, () => gameStore.updateSetting('textScale', Math.min(1.4, settings.textScale + 0.1)));
+    this.addButton(left, sectionY + 202, controlWidth, `QUALITY ${settings.quality.toUpperCase()}`, 0xbf78ff, () => gameStore.updateSetting('quality', settings.quality === 'high' ? 'medium' : settings.quality === 'medium' ? 'low' : 'high'));
+    this.addButton(right, sectionY + 202, controlWidth, `OFFLINE ${settings.offlineLimitMinutes}`, 0xbf78ff, () => gameStore.updateSetting('offlineLimitMinutes', settings.offlineLimitMinutes >= 60 ? 0 : settings.offlineLimitMinutes === 0 ? 15 : settings.offlineLimitMinutes + 15));
+    this.addButton(left, sectionY + 240, controlWidth, settings.paused ? 'RESUME' : 'PAUSE', 0x7af6bd, () => gameStore.togglePause());
+    this.addButton(right, sectionY + 240, controlWidth, `SPEED ${settings.simulationSpeed}×`, 0x7af6bd, () => gameStore.cycleSpeed());
+    this.addButton(width * 0.27, sectionY + 278, compact ? 164 : 190, `ALERTS ${settings.alertLevel.toUpperCase()}`, 0x65c7ff, () => gameStore.updateSetting('alertLevel', settings.alertLevel === 'all' ? 'important' : settings.alertLevel === 'important' ? 'critical' : 'all'));
+    this.addButton(width * 0.73, sectionY + 278, compact ? 164 : 190, 'FULLSCREEN', 0xff8fcf, () => this.scale.isFullscreen ? this.scale.stopFullscreen() : this.scale.startFullscreen());
+    this.addText(0, sectionY + 310, 'KEYS  SPACE pause  ·  1/2/3 speed  ·  P photo  ·  G guide  ·  ESC close', compact ? 8 : 10, '#90c9b0', width);
   }
 
   private renderSaves() {
@@ -376,8 +378,8 @@ export class ColonyScene extends Phaser.Scene {
 
   private renderChangelog() {
     const { width } = this.dimensions();
-    this.addHeading(0, 0, 'BUILDING PROGRESSION & COLONY ECONOMY  /  2026.07');
-    this.addText(0, 30, 'SPECIALIZATION PATHS\nEvery facility now has a distinct Quality path and Capacity path with exact costs, station changes, output multipliers, pollution effects, research requirements, and construction estimates shown before purchase.\n\nREAL CONSTRUCTION\nResources are reserved, then visibly delivered by Luma carrying material crates. Construction tracks material delivery and skilled work separately. Builders and Technology research finish projects faster, while every completed tier receives a distinct visual evolution.\n\nSKILLED OPERATORS\nFacilities name their ideal role and skill. Trained matching operators provide measurable bonuses to nourishment, clarity, resonance, rest, healing, and industry. Quality upgrades add specialized benefits; Capacity upgrades reduce queues.\n\nMAINTENANCE & MILESTONES\nDurability now creates an understandable economy. Automatic maintenance funds repairs below 55%, or can be switched to manual control. Worn facilities lose output and can shut down. New challenges reward path specialization and upgrading all six facility families.\n\nPLACEMENT INTELLIGENCE\nPlacement previews now show influence, clearance, nearby connections, and the exact reason a location is blocked before resources are committed.', 12, '#e4f7ed', width);
+    this.addHeading(0, 0, 'LIVING MOTION & SOUNDSCAPE  /  2026.07');
+    this.addText(0, 30, 'EXPRESSIVE LUMA\nEvery activity now has its own physical language: smoother stepping and facing, nibbling, splashing, dancing, sleeping breath, tool work, treatment glow, reaching, carrying, repair, celebration, and argument gestures. Mood changes blink rate, energy, bounce, posture, and eye openness.\n\nACTIVE FACILITIES\nEvery facility now has a distinct operating rhythm. Pools ripple, gardens resonate, looms grow, archives breathe, extractors rotate, and clinics pulse. Construction completion and upgrades receive particles, light, camera feedback, and a facility-specific sound signature.\n\nLIVING HABITAT\nWeather now controls foliage sway, rain density, mist, storm darkness, and environmental sound. Water glints, nighttime motes, sunrise and sunset color, footprints, and activity particles make the habitat respond continuously without obscuring the simulation.\n\nADAPTIVE AUDIO\nOriginal procedural music moves between daytime, nighttime, rain, danger, and celebration. Creature voices, environment ambience, and music have separate volume controls.\n\nPERFORMANCE SAFETY\nPresentation budgets scale with quality mode and colony size. Large colonies update distant animation less often, reduce particles and relationship redraws, and disable costly facility effects in low-power mode while simulation behavior remains unchanged.', 12, '#e4f7ed', width);
   }
 
   private shutdown() { this.unsubscribe?.(); this.unsubscribe = undefined; this.scale.off('resize', this.rebuild, this); this.input.keyboard?.removeAllListeners(); }

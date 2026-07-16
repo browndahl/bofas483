@@ -25,7 +25,7 @@ npm run preview
 
 ## Architecture
 
-- Phaser renders an original bundled pixel-art habitat, procedural actors and structures, pooled effects, per-creature synthesized voices, responsive HUD, detailed creature/facility inspection, dialogue, audits, and fiction-contained glitches.
+- Phaser renders an original bundled pixel-art habitat, expressive task-specific creature animation, animated facility operation, pooled weather/activity effects, adaptive procedural music and ambience, per-creature synthesized voices, responsive HUD, detailed creature/facility inspection, dialogue, audits, and fiction-contained glitches.
 - Typed creature/building state is independent of Phaser objects. A Web Worker advances needs, inherited personalities, roles, six trainable skills, ambitions, preferences, friendships, comfort behavior, autonomous tasks, movement, exposure, reproduction, pollution, work, illness, and death on a measured five-Hz cadence; Phaser interpolates state deltas.
 - Active buildings are grouped by kind once per simulation step. Capacity-aware reservations distribute urgent visitors across facilities, assign distinct service stations, and form visible overflow queues. A spatial grid bounds nearby-agent searches, while cached navigation grids route creatures around habitat scenery and player structures. Social behavior uses exclusive pairs, validated open-ground rendezvous points, urgent-need preemption, pursuit deadlines, and movement-stall recovery so agents cannot remain in targeting loops. Rendering culls off-camera creature views, limits ambient thoughts as the colony grows, and hides most labels at scale. The worker keeps agents as plain data behind a 250-creature cap and relationship histories retain only each creature's eight strongest bonds.
 - Zod validates local and cloud save data before hydration. Event history is capped, objective rewards are idempotent, and legacy raw local saves migrate roles, skills, preferences, ambitions, and queue state automatically. Returning after 45 seconds advances up to 15 minutes of bounded offline activity, protects exhausted Luma from offline death, and presents a resource/birth/bond summary.
@@ -98,6 +98,8 @@ Restore procedure:
 - Personalities remain stable across reloads, children inherit a blend of parent traits, and nearby Luma socialize or comfort distressed friends.
 - Thought bubbles explain current intent; pink links show friendship and green links show active comfort.
 - Clicking a Luma produces an original mood-based voice, greeting bubble, and reaction bounce without repeating a copyrighted character voice.
+- Walking, eating, washing, playing, sleeping, working, healing, building, repairing, comforting, arguing, and celebrating have distinct readable motion and feedback.
+- Day, night, rain, storms, celebrations, and danger alter the original procedural soundscape; voice, ambience, and music volumes are independently adjustable.
 - Roles, all six skills, preferences, ambition progress, and strongest bonds survive save/reload and improve through relevant activity.
 - Clicking a building shows live capacity, occupants, queue length, effects, upgrade cost, and level; all six facilities can reach level two.
 - Busy facilities reserve distinct service positions, prioritize urgent needs, and distribute overflow visitors between available queues.

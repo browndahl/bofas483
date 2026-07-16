@@ -1,4 +1,12 @@
 import Phaser from 'phaser';
+import {
+  buildingMotionFrequency,
+  creaturePose,
+  presentationBudget,
+  soundscapeMood,
+  soundscapeNotes,
+  weatherAmbienceFrequency
+} from '../rendering/presentation';
 import { BUILDINGS, buildingCapacity, buildingDisplayName, materialDeliveryRatio } from '../simulation/building';
 import { personalityLabels } from '../simulation/personality';
 import { contextualVocalization, voicePitch, type CreatureMood, type VoiceContext } from '../simulation/vocalization';
@@ -9,11 +17,13 @@ import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
 interface CreatureView {
   container: Phaser.GameObjects.Container;
   actor: Phaser.GameObjects.Container;
+  pose: Phaser.GameObjects.Container;
   shadow: Phaser.GameObjects.Ellipse;
   aura: Phaser.GameObjects.Arc;
   selection: Phaser.GameObjects.Arc;
   body: Phaser.GameObjects.Graphics;
   eyes: Phaser.GameObjects.Graphics;
+  gesture: Phaser.GameObjects.Graphics;
   status: Phaser.GameObjects.Text;
   label: Phaser.GameObjects.Text;
   thought: Phaser.GameObjects.Container;
@@ -21,9 +31,21 @@ interface CreatureView {
   lastAlive: boolean;
   visualSignature: string;
   lastName: string;
+  lastTask: CreatureState['task'];
+  facing: -1 | 1;
+  blinkAt: number;
+  blinkUntil: number;
 }
 
 interface AmbientMote { node: Phaser.GameObjects.Rectangle; originX: number; originY: number; phase: number; speed: number }
+interface FoliageTuft { node: Phaser.GameObjects.Rectangle; phase: number }
+interface WaterGlint { node: Phaser.GameObjects.Arc; phase: number }
+interface BuildingView {
+  container: Phaser.GameObjects.Container;
+  halo: Phaser.GameObjects.Rectangle;
+  core: Phaser.GameObjects.Rectangle;
+  activity: Phaser.GameObjects.Graphics;
+}
 
 const WORLD_WIDTH = 1600;
 const WORLD_HEIGHT = 1000;
@@ -31,7 +53,7 @@ const WORLD_HEIGHT = 1000;
 export class WorldScene extends Phaser.Scene {
   private views = new Map<string, CreatureView>();
   private creaturesById = new Map<string, CreatureState>();
-  private buildingViews = new Map<string, Phaser.GameObjects.Container>();
+  private buildingViews = new Map<string, BuildingView>();
   private pollutionGraphics!: Phaser.GameObjects.Graphics;
   private relationshipGraphics!: Phaser.GameObjects.Graphics;
   private pathGraphics!: Phaser.GameObjects.Graphics;
@@ -47,22 +69,31 @@ export class WorldScene extends Phaser.Scene {
   private placementGhost?: Phaser.GameObjects.Container;
   private lastPinchDistance = 0;
   private effectPool: Phaser.GameObjects.Rectangle[] = [];
+  private effectCursor = 0;
   private footprintPool: Phaser.GameObjects.Rectangle[] = [];
   private footprintCursor = 0;
   private lastFootprintAt = 0;
   private ambientMotes: AmbientMote[] = [];
+  private foliage: FoliageTuft[] = [];
+  private waterGlints: WaterGlint[] = [];
   private pollutionSignature = '';
   private audioContext?: AudioContext;
+  private noiseBuffer?: AudioBuffer;
   private vocalBubbleUntil = new Map<string, number>();
   private vocalBubbleText = new Map<string, string>();
   private voiceClickCount = new Map<string, number>();
   private voiceCooldownUntil = new Map<string, number>();
   private lastAmbientVoiceAt = 0;
   private lastAmbienceAt = 0;
+  private lastMusicAt = 0;
+  private lastAtmosphereAt = 0;
+  private lastRelationshipAt = 0;
+  private frameIndex = 0;
   private audioUnlocked = false;
   private returnGreetingPending = false;
   private photoMode = false;
   private buildingSignature = '';
+  private buildingLifecycle = new Map<string, string>();
 
   constructor() { super('WorldScene'); }
   create() {
@@ -74,7 +105,7 @@ export class WorldScene extends Phaser.Scene {
     this.weatherGraphics = this.add.graphics().setDepth(4).setBlendMode(Phaser.BlendModes.ADD);
     this.dayOverlay = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_WIDTH, WORLD_HEIGHT, 0x08152a, 0).setDepth(40).setBlendMode(Phaser.BlendModes.MULTIPLY);
     this.configureInput();
-    for (let i = 0; i < 24; i++) this.effectPool.push(this.add.rectangle(0, 0, 5, 5, 0x7af6bd, 0).setDepth(18));
+    for (let i = 0; i < 42; i++) this.effectPool.push(this.add.rectangle(0, 0, 5, 5, 0x7af6bd, 0).setDepth(18));
     for (let i = 0; i < 32; i++) this.footprintPool.push(this.add.rectangle(0, 0, 6, 3, 0x4b3e25, 0).setDepth(6));
     this.unsubscribe = gameStore.subscribe((state) => { this.state = state; this.syncState(state); });
     this.game.events.on('care', this.handleCare, this);
@@ -106,11 +137,21 @@ export class WorldScene extends Phaser.Scene {
       const node = this.add.rectangle(originX, originY, 2 + (i % 2) * 2, 2 + (i % 2) * 2, i % 7 === 0 ? 0xd8b6ff : 0xa9ffcf, 0.2 + (i % 4) * 0.04).setDepth(3).setBlendMode(Phaser.BlendModes.ADD);
       this.ambientMotes.push({ node, originX, originY, phase: i * 0.73, speed: 0.35 + (i % 5) * 0.08 });
     }
+    for (let i = 0; i < 28; i++) {
+      const x = 72 + (i * 179) % (WORLD_WIDTH - 144); const y = 100 + (i * 113) % (WORLD_HEIGHT - 170);
+      const tuft = this.add.rectangle(x, y, 4, 14 + i % 3 * 4, i % 4 === 0 ? 0x9ccf52 : 0x4f8b38, 0.38).setOrigin(0.5, 1).setDepth(3);
+      this.foliage.push({ node: tuft, phase: i * 0.47 });
+    }
+    [[154, 166], [250, 164], [1230, 146], [1370, 174], [1435, 807], [1510, 765]].forEach(([x, y], index) => {
+      const glint = this.add.circle(x, y, 3 + index % 2, 0xa5ffff, 0.3).setDepth(3).setBlendMode(Phaser.BlendModes.ADD);
+      this.waterGlints.push({ node: glint, phase: index * 1.37 });
+    });
     crisp(this.add.text(52, 42, 'HABITAT 483  ·  LUMEN FIELD', { fontFamily: DISPLAY_FONT, fontSize: '13px', color: '#fff1ba', backgroundColor: '#3a2918cc', padding: { x: 9, y: 5 }, letterSpacing: 1 })).setDepth(3);
   }
   private configureInput() {
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      this.audioUnlocked = true;
       if (pointer.rightButtonDown()) { this.cancelPlacement(); return; }
       if (this.placementGhost) return;
       this.dragging = true; this.dragStart.set(pointer.x, pointer.y); this.cameraStart.set(this.cameras.main.scrollX, this.cameras.main.scrollY);
@@ -222,15 +263,21 @@ export class WorldScene extends Phaser.Scene {
     const shadow = this.add.ellipse(2, 29, 48, 13, 0x18200e, 0.48);
     const aura = this.add.circle(0, 0, 34, Phaser.Display.Color.HSVToRGB(creature.hue / 360, 0.52, 0.96).color, 0.1).setBlendMode(Phaser.BlendModes.ADD);
     const selection = this.add.circle(0, 0, 34, 0x000000, 0).setStrokeStyle(3, 0xffec9c, 0);
-    const body = this.add.graphics(); const eyes = this.add.graphics();
+    const body = this.add.graphics(); const eyes = this.add.graphics(); const gesture = this.add.graphics();
+    const pose = this.add.container(0, 0, [body, eyes, gesture]);
     const status = crisp(this.add.text(29, -34, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '14px', color: '#071410', backgroundColor: '#f7bd62', padding: { x: 4, y: 2 } })).setOrigin(0.5).setVisible(false);
-    const actor = this.add.container(0, 0, [aura, selection, body, eyes, status]);
+    const actor = this.add.container(0, 0, [aura, selection, pose, status]);
     const label = crisp(this.add.text(0, 45, creature.name, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#fff1ba', backgroundColor: '#352816e8', padding: { x: 7, y: 4 } })).setOrigin(0.5).setStroke('#20170d', 1);
     const thoughtTail = this.add.triangle(0, 16, 0, 0, 10, 0, 5, 7, 0xfff3c4, 0.96).setOrigin(0.5, 0);
     const thoughtText = crisp(this.add.text(0, 0, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#2c2417', backgroundColor: '#fff3c4', padding: { x: 7, y: 4 }, align: 'center' })).setOrigin(0.5);
     const thought = this.add.container(0, -69, [thoughtTail, thoughtText]).setVisible(false);
     const container = this.add.container(creature.x, creature.y, [shadow, actor, label, thought]).setSize(82, 110).setDepth(10).setInteractive({ useHandCursor: true });
-    const view: CreatureView = { container, actor, shadow, aura, selection, body, eyes, status, label, thought, thoughtText, lastAlive: creature.alive, visualSignature: '', lastName: creature.name };
+    const serial = Number(creature.id.replace(/\D/g, '')) || 1;
+    const view: CreatureView = {
+      container, actor, pose, shadow, aura, selection, body, eyes, gesture, status, label, thought, thoughtText,
+      lastAlive: creature.alive, visualSignature: '', lastName: creature.name, lastTask: creature.task, facing: serial % 2 ? 1 : -1,
+      blinkAt: this.time.now + 900 + serial % 7 * 260, blinkUntil: 0
+    };
     container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (pointer.getDistance() < 8) {
         const current = this.state.creatures.find((c) => c.id === creature.id); if (!current) return;
@@ -242,7 +289,9 @@ export class WorldScene extends Phaser.Scene {
         const voice = contextualVocalization(current, variant, context, this.state.livingWorld.weather === 'storm' && current.personality.resilience < 0.55);
         this.vocalBubbleText.set(creature.id, voice.text); this.vocalBubbleUntil.set(creature.id, this.time.now + 1900);
         this.voiceCooldownUntil.set(creature.id, this.time.now + 850); this.playCreatureVoice(current, voice.mood, variant, context);
-        this.tweens.killTweensOf(view.actor); this.tweens.add({ targets: view.actor, y: -9, scaleX: 1.08, scaleY: 0.94, duration: 105, yoyo: true, ease: 'Sine.easeOut' });
+        view.facing = pointer.worldX < current.x ? -1 : 1;
+        this.tweens.killTweensOf(view.actor); this.tweens.add({ targets: view.actor, y: -9, rotation: view.facing * -0.09, scaleX: 1.08, scaleY: 0.94, duration: 105, yoyo: true, ease: 'Sine.easeOut' });
+        this.emitWorldParticles(current.x, current.y - 18, Phaser.Display.Color.HSVToRGB(current.hue / 360, 0.42, 1).color, 6, 34);
         this.syncState(this.state); this.game.events.emit('creature-selected', current);
         const answer = this.state.creatures.filter((candidate) => candidate.alive && candidate.id !== current.id && Math.hypot(candidate.x - current.x, candidate.y - current.y) < 240).sort((a, b) => (b.bonds[current.id] ?? 0) - (a.bonds[current.id] ?? 0))[0];
         if (answer && (answer.bonds[current.id] ?? 0) > 18) this.time.delayedCall(280, () => this.voiceCreature(answer, 'answer'));
@@ -301,7 +350,7 @@ export class WorldScene extends Phaser.Scene {
     view.visualSignature = signature;
     const light = Phaser.Display.Color.ValueToColor(color).clone().lighten(24).color;
     const dark = Phaser.Display.Color.ValueToColor(color).clone().darken(38).color;
-    view.body.clear(); view.eyes.clear();
+    view.body.clear(); view.eyes.clear(); view.gesture.clear();
     view.selection.setStrokeStyle(selected ? 3 : 1, selected ? 0xffec9c : color, selected ? 0.95 : 0.12).setScale(selected ? 1 : 0.92);
     view.aura.setFillStyle(color, creature.alive ? (selected ? 0.16 : 0.07) : 0.025);
     if (creature.alive) {
@@ -338,6 +387,23 @@ export class WorldScene extends Phaser.Scene {
       }
       if (creature.task === 'maintain') {
         view.body.fillStyle(0x65c7ff, 1).fillRect(16, 10, 5, 16).fillRect(11, 15, 15, 5);
+      }
+      if (creature.task === 'eat') {
+        view.gesture.fillStyle(0xf7bd62, 1).fillCircle(23, 7, 6).fillStyle(0x7cbf4f, 1).fillRect(21, -1, 4, 7);
+      } else if (creature.task === 'bathe') {
+        view.gesture.fillStyle(0x9fe9ff, 0.9).fillCircle(-25, 5, 4).fillCircle(24, -8, 3).fillCircle(19, 17, 2);
+      } else if (creature.task === 'play' || creature.task === 'celebrate') {
+        view.gesture.fillStyle(0xfff0a8, 0.95).fillRect(-31, -15, 5, 5).fillRect(26, -24, 6, 6).fillRect(27, 10, 4, 4);
+      } else if (creature.task === 'sleep') {
+        view.gesture.lineStyle(3, 0xd8b6ff, 0.85).strokeCircle(25, -16, 5).strokeCircle(31, -25, 3);
+      } else if (creature.task === 'work') {
+        view.gesture.lineStyle(4, 0xd4a65f, 1).lineBetween(17, 3, 29, 20).fillStyle(0x69736d, 1).fillRect(24, 16, 12, 7);
+      } else if (creature.task === 'heal') {
+        view.gesture.fillStyle(0xff8fcf, 0.95).fillRect(19, -4, 6, 22).fillRect(11, 4, 22, 6);
+      } else if (creature.task === 'socialize' || creature.task === 'comfort') {
+        view.gesture.lineStyle(4, creature.task === 'comfort' ? 0x7af6bd : 0xffa6d8, 0.9).lineBetween(18, 5, 32, -2).fillCircle(33, -3, 4);
+      } else if (creature.task === 'argue') {
+        view.gesture.lineStyle(3, 0xff735f, 0.95).lineBetween(20, -18, 31, -8).lineBetween(31, -18, 20, -8);
       }
     } else {
       view.eyes.fillStyle(0x25301f, 1).fillRect(-13, 14, 9, 3).fillRect(-10, 11, 3, 9).fillRect(4, 14, 9, 3).fillRect(7, 11, 3, 9);
@@ -400,42 +466,56 @@ export class WorldScene extends Phaser.Scene {
       for (let index = 0; index < crates; index++) art.fillStyle(0xb87a3e, 1).fillRect(-43 + index * 17, 21, 14, 12).fillStyle(0xf0c77a, 0.8).fillRect(-40 + index * 17, 23, 8, 3);
     }
     if (!building.constructing && building.durability < 55) art.fillStyle(0xff735f, 0.9).fillRect(-44, -34, 10, 10).fillStyle(0xffd4c9, 1).fillRect(-41, -31, 4, 4);
+    const activity = this.add.graphics();
+    if (building.kind === 'nutrient-bed') activity.fillStyle(0xf7e77a, 0.8).fillCircle(-18, -30, 3).fillCircle(1, -36, 3).fillCircle(19, -28, 3);
+    if (building.kind === 'wash-pool') activity.lineStyle(2, 0xc9ffff, 0.65).strokeCircle(0, -1, 18).strokeCircle(0, -1, 25);
+    if (building.kind === 'resonance-garden') activity.lineStyle(2, 0xe4c7ff, 0.75).lineBetween(-26, -35, -26, -12).lineBetween(26, -35, 26, -12);
+    if (building.kind === 'nest') activity.fillStyle(0xffd58a, 0.16).fillCircle(0, -4, 32);
+    if (building.kind === 'extractor') activity.lineStyle(4, 0xff9a73, 0.7).strokeCircle(0, -8, 22).lineBetween(0, -33, 0, 17).lineBetween(-25, -8, 25, -8);
+    if (building.kind === 'clinic') activity.fillStyle(0xffb9da, 0.24).fillCircle(0, -5, 30).fillStyle(0xffffff, 0.8).fillRect(-2, -28, 4, 8);
     const level = crisp(this.add.text(-34, -27, building.level >= 3 ? 'Ⅲ' : building.level >= 2 ? 'Ⅱ' : 'Ⅰ', { fontFamily: DISPLAY_FONT, fontStyle: 'bold', fontSize: '12px', color: '#fff0ba', backgroundColor: '#382918dd', padding: { x: 3, y: 2 } })).setOrigin(0.5);
     const name = crisp(this.add.text(0, 50, `${buildingDisplayName(building).toUpperCase()}${building.constructing ? ` ${Math.floor(building.constructionProgress)}%` : ''}`, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#fff0ba', backgroundColor: '#382918ee', padding: { x: 7, y: 4 } })).setOrigin(0.5);
-    const container = this.add.container(building.x, building.y, [shadow, halo, art, core, glyph, level, name]).setDepth(7).setSize(120, 104).setInteractive({ useHandCursor: true }).setData('level', building.level);
+    const container = this.add.container(building.x, building.y, [shadow, halo, art, activity, core, glyph, level, name]).setDepth(7).setSize(120, 104).setInteractive({ useHandCursor: true }).setData('level', building.level);
     container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (pointer.getDistance() < 8 && !this.placementKind) {
-        this.audioUnlocked = true; this.soundPulse(160 + (Object.keys(BUILDINGS).indexOf(building.kind) + 1) * 55, 260);
+        this.audioUnlocked = true; this.playBuildingSound(building.kind);
         this.game.events.emit('building-selected', this.state.buildings.find((candidate) => candidate.id === building.id));
       }
     });
-    this.tweens.add({ targets: [core, halo], alpha: { from: 0.35, to: 0.9 }, scale: { from: 0.88, to: 1.12 }, duration: 1200 + (building.id.charCodeAt(1) % 5) * 110, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    return container;
+    return { container, halo, core, activity };
   }
   private syncState(state: WorldState) {
     this.creaturesById = new Map(state.creatures.map((creature) => [creature.id, creature]));
     const creatureIds = new Set(state.creatures.map((creature) => creature.id));
     this.views.forEach((view, id) => { if (!creatureIds.has(id)) { view.container.destroy(); this.views.delete(id); } });
     const buildingIds = new Set(state.buildings.map((building) => building.id));
-    this.buildingViews.forEach((view, id) => { if (!buildingIds.has(id)) { view.destroy(); this.buildingViews.delete(id); } });
+    this.buildingViews.forEach((view, id) => { if (!buildingIds.has(id)) { view.container.destroy(); this.buildingViews.delete(id); this.buildingLifecycle.delete(id); } });
     state.creatures.forEach((creature) => {
       let view = this.views.get(creature.id);
       if (!view) { view = this.createCreatureView(creature); this.views.set(creature.id, view); }
       view.container.setVisible(!creature.expeditionId);
       if (view.lastAlive && !creature.alive) { if (state.livingWorld.settings.screenShake) this.cameras.main.shake(400, 0.006); this.game.events.emit('glitch', state.livingWorld.settings.reducedMotion ? 0.25 : 0.9); }
       if (view.lastName !== creature.name) { view.lastName = creature.name; this.voiceCreature(creature, 'rename'); }
+      if (view.lastTask !== creature.task) {
+        this.playTaskTransition(creature, view.lastTask, creature.task);
+        view.lastTask = creature.task;
+      }
       view.lastAlive = creature.alive;
       this.drawCreature(view, creature);
     });
     state.buildings.forEach((building) => {
       const existing = this.buildingViews.get(building.id);
       const signature = `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}:${Math.floor(materialDeliveryRatio(building) * 5)}:${Math.floor(building.durability / 10)}:${building.maintenanceFunded}`;
-      if (existing && existing.getData('signature') !== signature) { existing.destroy(); this.buildingViews.delete(building.id); }
+      const lifecycle = `${building.constructing}:${building.level}`;
+      const previousLifecycle = this.buildingLifecycle.get(building.id);
+      if (previousLifecycle && previousLifecycle !== lifecycle && (!building.constructing || Number(previousLifecycle.split(':')[1]) < building.level)) this.playBuildingCompletion(building);
+      this.buildingLifecycle.set(building.id, lifecycle);
+      if (existing && existing.container.getData('signature') !== signature) { existing.container.destroy(); this.buildingViews.delete(building.id); }
       if (!this.buildingViews.has(building.id)) this.buildingViews.set(building.id, this.createBuildingView(building));
     });
-    this.buildingViews.forEach((container, id) => {
+    this.buildingViews.forEach((view, id) => {
       const building = state.buildings.find((item) => item.id === id);
-      if (building) container.setData('signature', `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}:${Math.floor(materialDeliveryRatio(building) * 5)}:${Math.floor(building.durability / 10)}:${building.maintenanceFunded}`);
+      if (building) view.container.setData('signature', `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}:${Math.floor(materialDeliveryRatio(building) * 5)}:${Math.floor(building.durability / 10)}:${building.maintenanceFunded}`);
     });
     this.drawPaths(state);
     this.drawPollution(state);
@@ -488,6 +568,50 @@ export class WorldScene extends Phaser.Scene {
       }
     });
   }
+  private emitWorldParticles(x: number, y: number, color: number, count: number, radius: number) {
+    const settings = this.state.livingWorld.settings;
+    if (settings.lowPower || settings.reducedMotion) return;
+    const actualCount = settings.quality === 'high' ? count : Math.max(2, Math.ceil(count * 0.55));
+    for (let index = 0; index < actualCount; index++) {
+      const particle = this.effectPool[this.effectCursor++ % this.effectPool.length];
+      const angle = index / actualCount * Math.PI * 2 + this.effectCursor * 0.17;
+      particle.setPosition(x, y).setFillStyle(color).setAlpha(0.85).setScale(index % 3 === 0 ? 1.4 : 0.85).setAngle(index * 23);
+      this.tweens.killTweensOf(particle);
+      this.tweens.add({
+        targets: particle,
+        x: x + Math.cos(angle) * radius,
+        y: y + Math.sin(angle) * radius - 8,
+        alpha: 0,
+        scale: 0.2,
+        angle: particle.angle + 90,
+        duration: 420 + index * 22,
+        ease: 'Cubic.easeOut'
+      });
+    }
+  }
+  private playTaskTransition(creature: CreatureState, previous: CreatureState['task'], next: CreatureState['task']) {
+    if (!creature.alive || previous === next) return;
+    const color = next === 'bathe' ? 0x9fe9ff : next === 'heal' ? 0xff8fcf : next === 'play' || next === 'celebrate' ? 0xfff0a8 : next === 'construct' || next === 'maintain' ? 0xd4a65f : next === 'socialize' || next === 'comfort' ? 0xffa6d8 : 0x7af6bd;
+    if (['bathe', 'heal', 'play', 'celebrate', 'construct', 'maintain', 'socialize', 'comfort'].includes(next)) this.emitWorldParticles(creature.x, creature.y + 6, color, next === 'celebrate' ? 10 : 5, next === 'celebrate' ? 55 : 28);
+  }
+  private playBuildingCompletion(building: BuildingState) {
+    const def = BUILDINGS[building.kind];
+    this.emitWorldParticles(building.x, building.y - 8, def.color, building.level >= 3 ? 24 : 16, building.level >= 3 ? 105 : 78);
+    this.playBuildingSound(building.kind, true);
+    if (this.state.livingWorld.settings.screenShake && !this.state.livingWorld.settings.reducedMotion) this.cameras.main.shake(building.level >= 3 ? 280 : 170, building.level >= 3 ? 0.004 : 0.002);
+    this.cameras.main.flash(160, 255, 240, 170, true);
+  }
+  private playBuildingSound(kind: BuildingKind, completed = false) {
+    const frequencies: Record<BuildingKind, number[]> = {
+      'nutrient-bed': [220, 330, 440],
+      'wash-pool': [310, 420, 540],
+      'resonance-garden': [392, 523, 659],
+      nest: [165, 220, 277],
+      extractor: [98, 147, 196],
+      clinic: [262, 349, 523]
+    };
+    frequencies[kind].forEach((frequency, index) => this.time.delayedCall(index * (completed ? 95 : 55), () => this.soundPulse(frequency, completed ? 420 : 190)));
+  }
   private soundPulse(frequency: number, duration: number) {
     try {
       const settings = this.state.livingWorld.settings; if (settings.muted || settings.ambienceVolume <= 0) return;
@@ -499,6 +623,56 @@ export class WorldScene extends Phaser.Scene {
       gain.gain.setValueAtTime(0.055 * settings.ambienceVolume, context.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + duration / 1000);
       oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + duration / 1000);
     } catch { /* audio is optional */ }
+  }
+  private playAmbientTexture() {
+    try {
+      const settings = this.state.livingWorld.settings; if (settings.muted || settings.ambienceVolume <= 0) return;
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const context = this.audioContext ?? new AudioContextClass(); this.audioContext = context;
+      if (context.state === 'suspended') void context.resume();
+      if (!this.noiseBuffer) {
+        const length = Math.floor(context.sampleRate * 1.1);
+        this.noiseBuffer = context.createBuffer(1, length, context.sampleRate);
+        const data = this.noiseBuffer.getChannelData(0);
+        for (let index = 0; index < length; index++) data[index] = (Math.random() * 2 - 1) * (1 - index / length * 0.35);
+      }
+      const source = context.createBufferSource(); const filter = context.createBiquadFilter(); const envelope = context.createGain();
+      source.buffer = this.noiseBuffer;
+      filter.type = this.state.livingWorld.weather === 'rain' || this.state.livingWorld.weather === 'storm' ? 'bandpass' : 'lowpass';
+      filter.frequency.value = this.state.livingWorld.weather === 'rain' ? 2400 : this.state.livingWorld.weather === 'storm' ? 1300 : this.state.livingWorld.weather === 'wind' ? 850 : 520;
+      filter.Q.value = this.state.livingWorld.weather === 'mist' ? 2.4 : 0.8;
+      const now = context.currentTime;
+      envelope.gain.setValueAtTime(0.0001, now);
+      envelope.gain.exponentialRampToValueAtTime((this.state.livingWorld.weather === 'clear' ? 0.012 : 0.035) * settings.ambienceVolume, now + 0.08);
+      envelope.gain.exponentialRampToValueAtTime(0.0001, now + 1);
+      source.connect(filter).connect(envelope).connect(context.destination); source.start(now); source.stop(now + 1.04);
+      const tone = context.createOscillator(); const toneGain = context.createGain();
+      tone.type = 'sine'; tone.frequency.value = weatherAmbienceFrequency(this.state.livingWorld.weather);
+      toneGain.gain.setValueAtTime(0.0001, now); toneGain.gain.exponentialRampToValueAtTime(0.018 * settings.ambienceVolume, now + 0.1); toneGain.gain.exponentialRampToValueAtTime(0.0001, now + 1.3);
+      tone.connect(toneGain).connect(context.destination); tone.start(now); tone.stop(now + 1.35);
+    } catch { /* ambience is optional */ }
+  }
+  private playMusicPhrase() {
+    try {
+      const settings = this.state.livingWorld.settings; if (settings.muted || settings.musicVolume <= 0) return;
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const context = this.audioContext ?? new AudioContextClass(); this.audioContext = context;
+      if (context.state === 'suspended') void context.resume();
+      const mood = soundscapeMood(this.state); const notes = soundscapeNotes(mood, this.state.seed + this.state.livingWorld.day);
+      const master = context.createGain(); const now = context.currentTime; const quiet = mood === 'night' || mood === 'rain';
+      master.gain.setValueAtTime(0.0001, now); master.gain.exponentialRampToValueAtTime((quiet ? 0.028 : 0.038) * settings.musicVolume, now + 0.08);
+      master.gain.exponentialRampToValueAtTime(0.0001, now + 2.45); master.connect(context.destination);
+      notes.forEach((frequency, index) => {
+        const start = now + index * (mood === 'danger' ? 0.28 : 0.39);
+        const oscillator = context.createOscillator(); const filter = context.createBiquadFilter(); const noteGain = context.createGain();
+        oscillator.type = mood === 'danger' ? 'sawtooth' : mood === 'celebration' ? 'triangle' : 'sine';
+        oscillator.frequency.setValueAtTime(frequency, start);
+        if (mood === 'celebration') oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.01, start + 0.42);
+        filter.type = 'lowpass'; filter.frequency.value = quiet ? 900 : 1600; filter.Q.value = 1.1;
+        noteGain.gain.setValueAtTime(0.0001, start); noteGain.gain.exponentialRampToValueAtTime(index === 0 ? 0.7 : 0.42, start + 0.04); noteGain.gain.exponentialRampToValueAtTime(0.0001, start + 0.72);
+        oscillator.connect(filter).connect(noteGain).connect(master); oscillator.start(start); oscillator.stop(start + 0.76);
+      });
+    } catch { /* music is optional */ }
   }
   private voiceCreature(creature: CreatureState, context: VoiceContext) {
     if (!creature.alive || (this.voiceCooldownUntil.get(creature.id) ?? 0) > this.time.now) return;
@@ -543,10 +717,15 @@ export class WorldScene extends Phaser.Scene {
   }
   private updateAtmosphere(time: number) {
     const living = this.state.livingWorld; const dayLight = Math.max(0, Math.sin(living.dayTime * Math.PI)); const night = 1 - dayLight;
-    this.dayOverlay.setFillStyle(living.season === 'frostquiet' ? 0x152949 : living.season === 'amberfall' ? 0x3a1d16 : 0x08152a, night * 0.48);
+    const stormDarkness = living.weather === 'storm' ? 0.16 : living.weather === 'rain' ? 0.07 : 0;
+    this.dayOverlay.setFillStyle(living.season === 'frostquiet' ? 0x152949 : living.season === 'amberfall' ? 0x3a1d16 : 0x08152a, Math.min(0.58, night * 0.48 + stormDarkness));
     this.weatherGraphics.clear();
-    if (living.settings.lowPower || living.settings.quality === 'low') return;
-    const count = living.weather === 'storm' ? 70 : living.weather === 'rain' ? 46 : living.weather === 'mist' ? 20 : living.weather === 'wind' ? 18 : 0;
+    const sunrise = Math.max(0, 1 - Math.abs(living.dayTime - 0.2) / 0.12); const sunset = Math.max(0, 1 - Math.abs(living.dayTime - 0.8) / 0.12);
+    if (sunrise + sunset > 0) this.weatherGraphics.fillStyle(0xffb36a, (sunrise + sunset) * 0.045).fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    const budget = presentationBudget(living.settings, this.state.creatures.length);
+    if (!budget.weatherParticles) return;
+    const weatherLimit = living.weather === 'storm' ? budget.weatherParticles : living.weather === 'rain' ? Math.round(budget.weatherParticles * 0.68) : living.weather === 'mist' ? Math.round(budget.weatherParticles * 0.34) : living.weather === 'wind' ? Math.round(budget.weatherParticles * 0.3) : 0;
+    const count = Math.max(0, weatherLimit);
     for (let index = 0; index < count; index++) {
       const x = (index * 97 + time * (living.weather === 'wind' ? 0.045 : 0.018)) % WORLD_WIDTH;
       const y = (index * 53 + time * 0.09) % WORLD_HEIGHT;
@@ -557,13 +736,18 @@ export class WorldScene extends Phaser.Scene {
   }
   private updateAmbientVoices(time: number) {
     if (!this.audioUnlocked || this.state.livingWorld.settings.muted) return;
-    if (time - this.lastAmbienceAt > (this.state.livingWorld.settings.lowPower ? 18000 : 9000)) {
+    const budget = presentationBudget(this.state.livingWorld.settings, this.state.creatures.length);
+    if (time - this.lastAmbienceAt > (this.state.livingWorld.settings.lowPower ? 18000 : 6800)) {
       this.lastAmbienceAt = time;
-      const night = this.state.livingWorld.dayTime < 0.18 || this.state.livingWorld.dayTime > 0.82;
-      const danger = this.state.livingWorld.weather === 'storm' || this.state.creatures.some((creature) => creature.alive && creature.needs.health < 25);
-      this.soundPulse(danger ? 105 : night ? 175 : 235, danger ? 950 : 620);
+      this.playAmbientTexture();
     }
-    if (time - this.lastAmbientVoiceAt < (this.state.livingWorld.settings.lowPower ? 12000 : 5200)) return;
+    const mood = soundscapeMood(this.state);
+    const musicInterval = this.state.livingWorld.settings.lowPower ? 22000 : mood === 'celebration' ? 6200 : mood === 'danger' ? 7600 : 10800;
+    if (time - this.lastMusicAt > musicInterval) {
+      this.lastMusicAt = time;
+      this.playMusicPhrase();
+    }
+    if (time - this.lastAmbientVoiceAt < (this.state.livingWorld.settings.lowPower ? 12000 : 5200 + budget.animationStride * 350)) return;
     const visible = this.state.creatures.filter((creature) => creature.alive && this.views.get(creature.id)?.container.visible);
     const critical = visible.find((creature) => Math.min(...Object.values(creature.needs)) < 18);
     const social = visible.find((creature) => ['socialize', 'comfort', 'celebrate'].includes(creature.task) && (creature.socialTimer > 0 || creature.task === 'celebrate'));
@@ -574,14 +758,28 @@ export class WorldScene extends Phaser.Scene {
   }
   update(time: number, delta: number) {
     const smoothing = 1 - Math.exp(-Math.min(delta, 50) * 0.012);
-    const camera = this.cameras.main;
-    this.ambientMotes.forEach((mote) => {
+    const camera = this.cameras.main; const budget = presentationBudget(this.state.livingWorld.settings, this.state.creatures.length);
+    const night = this.state.livingWorld.dayTime < 0.18 || this.state.livingWorld.dayTime > 0.82;
+    this.frameIndex++;
+    this.ambientMotes.forEach((mote, index) => {
+      const active = index < budget.activeMotes;
+      mote.node.setVisible(active);
+      if (!active) return;
       mote.node.x = mote.originX + Math.sin(time * 0.0005 * mote.speed + mote.phase) * 12;
       mote.node.y = mote.originY + Math.cos(time * 0.00038 * mote.speed + mote.phase) * 9;
-      mote.node.alpha = 0.13 + (Math.sin(time * 0.0012 + mote.phase) + 1) * 0.09;
+      mote.node.alpha = (night ? 0.2 : 0.1) + (Math.sin(time * 0.0012 + mote.phase) + 1) * (night ? 0.14 : 0.07);
     });
-    this.updateAtmosphere(time); this.updateAmbientVoices(time);
-    if (!this.state.livingWorld.settings.lowPower && time - this.lastFootprintAt > 180) {
+    if (!this.state.livingWorld.settings.lowPower) {
+      const windStrength = this.state.livingWorld.weather === 'storm' ? 0.18 : this.state.livingWorld.weather === 'wind' ? 0.12 : this.state.livingWorld.weather === 'rain' ? 0.07 : 0.035;
+      this.foliage.forEach((tuft) => { tuft.node.rotation = Math.sin(time * 0.0018 + tuft.phase) * windStrength; });
+      this.waterGlints.forEach((glint) => {
+        glint.node.alpha = 0.12 + (Math.sin(time * 0.003 + glint.phase) + 1) * (night ? 0.2 : 0.12);
+        glint.node.setScale(0.75 + (Math.sin(time * 0.0023 + glint.phase) + 1) * 0.3);
+      });
+    }
+    if (time - this.lastAtmosphereAt >= budget.atmosphereInterval) { this.lastAtmosphereAt = time; this.updateAtmosphere(time); }
+    this.updateAmbientVoices(time);
+    if (!this.state.livingWorld.settings.lowPower && time - this.lastFootprintAt > budget.footprintInterval) {
       const walkers = this.state.creatures.filter((creature) => creature.alive && Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y) > 18 && this.views.get(creature.id)?.container.visible);
       const walker = walkers[this.footprintCursor % Math.max(1, walkers.length)];
       if (walker) {
@@ -590,25 +788,51 @@ export class WorldScene extends Phaser.Scene {
         this.tweens.killTweensOf(footprint); this.tweens.add({ targets: footprint, alpha: 0, duration: 900 });
       }
     }
-    this.state.creatures.forEach((creature) => {
+    this.state.creatures.forEach((creature, index) => {
       const view = this.views.get(creature.id); if (!view) return;
       const dx = creature.x - view.container.x; const dy = creature.y - view.container.y;
       view.container.x += dx * smoothing; view.container.y += dy * smoothing;
-      const phase = Number(creature.id.replace(/\D/g, '')) * 0.71;
-      const motionScale = this.state.livingWorld.settings.reducedMotion ? 0.25 : 1;
-      const socialBounce = creature.task === 'celebrate' ? Math.abs(Math.sin(time * 0.009 + phase)) * 8 : creature.task === 'comfort' ? Math.sin(time * 0.005 + phase) * 3 : 0;
-      view.actor.y = creature.alive ? Math.sin(time * 0.004 + phase) * 2.5 * motionScale - socialBounce * motionScale : 0;
-      const expressionTilt = creature.task === 'argue' ? Math.sin(time * 0.018 + phase) * 0.12 : creature.task === 'socialize' ? Math.sin(time * 0.006 + phase) * 0.05 : 0;
-      view.actor.rotation = Phaser.Math.Linear(view.actor.rotation, creature.alive ? Phaser.Math.Clamp(dx * 0.002 + expressionTilt, -0.16, 0.16) : 0, smoothing * 0.5);
-      const pulse = 1 + Math.sin(time * 0.003 + phase) * 0.055;
-      view.aura.setScale(pulse); view.shadow.setScale(1 - (pulse - 1) * 1.5, 1);
-      view.thought.y = -69 - (Number(creature.id.replace(/\D/g, '')) % 2) * 8 + Math.sin(time * 0.0025 + phase) * 2;
-      view.thought.alpha = 0.9 + (Math.sin(time * 0.003 + phase) + 1) * 0.05;
       const inView = view.container.x > camera.worldView.left - 100 && view.container.x < camera.worldView.right + 100 && view.container.y > camera.worldView.top - 100 && view.container.y < camera.worldView.bottom + 100;
       view.container.setVisible(inView && !creature.expeditionId);
       view.label.setVisible(inView && ((camera.zoom > 0.68 && this.state.creatures.length < 90) || creature.id === this.selectedId));
+      if (!inView || creature.expeditionId || (this.frameIndex + index) % budget.animationStride !== 0) return;
+      const phase = Number(creature.id.replace(/\D/g, '')) * 0.71;
+      const motionScale = this.state.livingWorld.settings.reducedMotion ? 0.25 : 1;
+      const moving = Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y) > 12 || Math.hypot(dx, dy) > 1;
+      const profile = creaturePose(creature, moving); const cycle = Math.sin(time * profile.cadence + phase); const step = moving ? Math.abs(cycle) : cycle * 0.45;
+      if (Math.abs(dx) > 0.7) view.facing = dx < 0 ? -1 : 1;
+      view.actor.y = creature.alive ? -Math.max(0, step) * profile.bob * motionScale : 0;
+      const targetRotation = creature.alive ? Phaser.Math.Clamp(view.facing * profile.lean * (moving ? cycle : 0.25 * cycle), -0.22, 0.22) : 0;
+      view.pose.rotation = Phaser.Math.Linear(view.pose.rotation, targetRotation, Math.min(1, smoothing * 1.4));
+      view.pose.scaleX = view.facing * (1 + Math.abs(cycle) * profile.squash * motionScale);
+      view.pose.scaleY = 1 - Math.abs(cycle) * profile.squash * motionScale;
+      if (time >= view.blinkAt) { view.blinkUntil = time + 95; view.blinkAt = time + 1900 + (Number(creature.id.replace(/\D/g, '')) % 7) * 230; }
+      view.eyes.scaleY = time < view.blinkUntil ? 0.12 : profile.eyeScale;
+      view.gesture.rotation = profile.gesture === 'repair' || profile.gesture === 'work' ? cycle * 0.32 : profile.gesture === 'cheer' || profile.gesture === 'dance' ? cycle * 0.18 : cycle * 0.06;
+      view.gesture.y = profile.gesture === 'splash' ? -Math.abs(cycle) * 5 : profile.gesture === 'nibble' ? cycle * 2 : 0;
+      view.gesture.alpha = creature.alive ? 0.78 + Math.abs(cycle) * 0.22 : 0;
+      const pulse = 1 + Math.sin(time * 0.003 + phase) * 0.055;
+      view.aura.setScale(pulse); view.shadow.setScale(1 - (pulse - 1) * 1.5, 1);
+      view.shadow.alpha = 0.4 - Math.max(0, step) * profile.shadowPulse;
+      view.thought.y = -69 - (Number(creature.id.replace(/\D/g, '')) % 2) * 8 + Math.sin(time * 0.0025 + phase) * 2;
+      view.thought.alpha = 0.9 + (Math.sin(time * 0.003 + phase) + 1) * 0.05;
     });
-    this.drawRelationships();
+    this.buildingViews.forEach((view, id) => {
+      const building = this.state.buildings.find((candidate) => candidate.id === id); if (!building) return;
+      const inView = building.x > camera.worldView.left - 140 && building.x < camera.worldView.right + 140 && building.y > camera.worldView.top - 120 && building.y < camera.worldView.bottom + 120;
+      view.container.setVisible(inView); if (!inView) return;
+      const phase = (Number(building.id.replace(/\D/g, '')) || 1) * 0.83; const frequency = buildingMotionFrequency(building.kind); const cycle = Math.sin(time * frequency + phase);
+      const operating = building.active && this.state.creatures.some((creature) => creature.alive && creature.destinationBuildingId === building.id && creature.isBeingServed);
+      view.core.setScale(0.9 + (cycle + 1) * (operating ? 0.16 : 0.07)).setAlpha(operating ? 0.82 + cycle * 0.16 : 0.48 + cycle * 0.14);
+      view.halo.setScale(1 + cycle * (operating ? 0.09 : 0.035)).setAlpha(operating ? 0.13 : 0.065);
+      view.activity.setVisible(budget.buildingEffects).setAlpha(building.active ? (operating ? 0.82 : 0.38) : 0.16);
+      if (budget.buildingEffects) {
+        view.activity.rotation = building.kind === 'extractor' ? time * 0.0018 : cycle * 0.08;
+        view.activity.y = building.kind === 'wash-pool' ? cycle * 3 : building.kind === 'resonance-garden' ? -Math.abs(cycle) * 4 : 0;
+        view.activity.setScale(1 + cycle * (operating ? 0.08 : 0.025));
+      }
+    });
+    if (time - this.lastRelationshipAt >= budget.relationshipInterval) { this.lastRelationshipAt = time; this.drawRelationships(); }
   }
   shutdown() {
     this.unsubscribe?.(); this.unsubscribe = undefined;

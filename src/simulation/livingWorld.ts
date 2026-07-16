@@ -56,12 +56,12 @@ export function createLivingWorld(): LivingWorldState {
       { id: 'six-fold-network', title: 'Six-Fold Network', description: 'Upgrade one of every facility type.', progress: 0, target: 6, complete: false }
     ],
     settings: {
-      muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, textScale: 1.1, highContrast: false, colorBlind: false,
+      muted: false, voiceVolume: 0.7, ambienceVolume: 0.38, musicVolume: 0.3, textScale: 1.1, highContrast: false, colorBlind: false,
       reducedMotion: false, screenShake: true, lowPower: false, quality: 'high', offlineLimitMinutes: 15, simulationSpeed: 1, paused: false,
       subtitles: true, tutorial: true, alertLevel: 'all'
     },
     telemetry: { averageTickMs: 0, peakTickMs: 0, fps: 60, creatures: 1, visibleCreatures: 1, pathRecoveries: 0 },
-    saveVersion: 5
+    saveVersion: 6
   };
 }
 
@@ -88,7 +88,7 @@ export function ensureLivingWorld(world: WorldState) {
   if ((world.livingWorld.saveVersion ?? 2) < 3) {
     world.livingWorld.settings.textScale = Math.max(1.1, world.livingWorld.settings.textScale);
   }
-  world.livingWorld.saveVersion = 5;
+  world.livingWorld.saveVersion = 6;
 }
 
 export function addJournal(world: WorldState, entry: Omit<JournalEntry, 'id' | 'at'> & { id?: string; at?: number }) {
