@@ -1,5 +1,23 @@
 import Phaser from 'phaser';
-import { advancedUpgradeCost, advancedUpgradeDescription, BUILDINGS, buildingCapacity, buildingDisplayName, canAffordAdvancedUpgrade, canAffordUpgrade, upgradeCost, upgradeDescription } from '../simulation/building';
+import {
+  advancedUpgradeAvailability,
+  advancedUpgradeCost,
+  advancedUpgradeDescription,
+  advancedUpgradePreview,
+  BUILDINGS,
+  buildingCapacity,
+  buildingDisplayName,
+  buildingEffectMultiplier,
+  buildingOperatorEfficiency,
+  buildingOperatorLabel,
+  buildingPollution,
+  maintenanceCost,
+  materialDeliveryRatio,
+  totalResearch,
+  upgradeAvailability,
+  upgradeDescription,
+  upgradePreview
+} from '../simulation/building';
 import { ACTIVITY_LABELS, ROLE_LABELS, SKILL_KEYS, SKILL_LABELS, skillLevel } from '../simulation/colonyLife';
 import { personalityLabels } from '../simulation/personality';
 import { relationshipStage } from '../simulation/livingWorld';
@@ -45,6 +63,8 @@ export class UIScene extends Phaser.Scene {
   private buildingUpgradeCost!: Phaser.GameObjects.Text;
   private upgradeButton!: Phaser.GameObjects.Container;
   private capacityUpgradeButton!: Phaser.GameObjects.Container;
+  private maintenanceButton!: Phaser.GameObjects.Container;
+  private repairButton!: Phaser.GameObjects.Container;
   private toast?: Phaser.GameObjects.Text;
   private lastChapter = 1;
   private observedDeaths = 0;
@@ -103,17 +123,24 @@ export class UIScene extends Phaser.Scene {
     });
 
     this.buildingPanel = this.add.container(0, 0).setDepth(111).setVisible(false);
-    this.buildingPanel.add(panel(this, 0, 0, 360, 360));
-    this.buildingName = crisp(this.add.text(-145, -140, '', { fontFamily: DISPLAY_FONT, fontSize: '16px', color: '#fff0a8', letterSpacing: 0.7 }));
-    this.buildingLevel = crisp(this.add.text(145, -138, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#7af6bd' })).setOrigin(1, 0);
-    this.buildingDetails = crisp(this.add.text(-145, -106, '', { fontFamily: UI_FONT, fontSize: '11px', color: '#dff5ea', lineSpacing: 5, wordWrap: { width: 290 } }));
-    this.buildingActivity = crisp(this.add.text(-145, 20, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#90c9b0', lineSpacing: 5 }));
-    this.buildingUpgradeCost = crisp(this.add.text(0, 77, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#f7bd62', align: 'center', wordWrap: { width: 320 }, lineSpacing: 3 })).setOrigin(0.5);
-    this.upgradeButton = button(this, -86, 139, 156, 42, 'QUALITY PATH', 0x7af6bd);
-    this.capacityUpgradeButton = button(this, 86, 139, 156, 42, 'CAPACITY PATH', 0x65c7ff);
+    this.buildingPanel.add(panel(this, 0, 0, 380, 430));
+    this.buildingName = crisp(this.add.text(-165, -193, '', { fontFamily: DISPLAY_FONT, fontSize: '16px', color: '#fff0a8', letterSpacing: 0.7 }));
+    this.buildingLevel = crisp(this.add.text(165, -191, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#7af6bd' })).setOrigin(1, 0);
+    this.buildingDetails = crisp(this.add.text(-165, -160, '', { fontFamily: UI_FONT, fontSize: '10px', color: '#dff5ea', lineSpacing: 4, wordWrap: { width: 330 } }));
+    this.buildingActivity = crisp(this.add.text(-165, -37, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#90c9b0', lineSpacing: 4, wordWrap: { width: 330 } }));
+    this.buildingUpgradeCost = crisp(this.add.text(0, 58, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '9px', color: '#f7bd62', align: 'center', wordWrap: { width: 350 }, lineSpacing: 2 })).setOrigin(0.5);
+    this.maintenanceButton = button(this, -91, 119, 166, 36, 'AUTO MAINTENANCE', 0xbf78ff);
+    this.repairButton = button(this, 91, 119, 166, 36, 'FUND REPAIR', 0xf7bd62);
+    this.upgradeButton = button(this, -91, 176, 166, 42, 'QUALITY PATH', 0x7af6bd);
+    this.capacityUpgradeButton = button(this, 91, 176, 166, 42, 'CAPACITY PATH', 0x65c7ff);
     this.upgradeButton.on('pointerup', () => this.upgradeSelectedBuilding('quality'));
     this.capacityUpgradeButton.on('pointerup', () => this.upgradeSelectedBuilding('capacity'));
-    this.buildingPanel.add([this.buildingName, this.buildingLevel, this.buildingDetails, this.buildingActivity, this.buildingUpgradeCost, this.upgradeButton, this.capacityUpgradeButton]);
+    this.maintenanceButton.on('pointerup', () => this.toggleSelectedMaintenance());
+    this.repairButton.on('pointerup', () => this.repairSelectedBuilding());
+    this.buildingPanel.add([
+      this.buildingName, this.buildingLevel, this.buildingDetails, this.buildingActivity, this.buildingUpgradeCost,
+      this.maintenanceButton, this.repairButton, this.upgradeButton, this.capacityUpgradeButton
+    ]);
     this.buildButton = button(this, 0, 0, 148, 46, 'BUILD  +', 0x7af6bd).setDepth(120);
     this.buildButton.on('pointerup', () => this.toggleBuildMenu());
     const profileButton = button(this, 0, 0, 124, 38, 'AUDIT ↗', 0xbf78ff).setDepth(120).setName('profile-button');
@@ -139,7 +166,7 @@ export class UIScene extends Phaser.Scene {
     this.resourcesText.setPosition(width - 18, 14); this.populationText.setPosition(width - 18, 35);
     this.objectiveText.setPosition(portrait ? 12 : width / 2, portrait ? 212 : 68).setOrigin(portrait ? 0 : 0.5, 0);
     this.creaturePanel.setPosition(portrait ? width / 2 : 178, portrait ? height - 214 : height - 226).setScale(portrait ? 0.82 : 1);
-    this.buildingPanel.setPosition(portrait ? width / 2 : 182, portrait ? height - 190 : height - 182).setScale(portrait ? 0.82 : 1);
+    this.buildingPanel.setPosition(portrait ? width / 2 : 192, portrait ? height - 214 : height - 230).setScale(portrait ? 0.82 : 1);
     this.buildButton.setPosition(portrait ? width - 84 : width - 92, height - 40);
     (this.children.getByName('profile-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? 68 : width - 230, height - 40);
     (this.children.getByName('save-button') as Phaser.GameObjects.Container | null)?.setPosition(portrait ? 174 : width - 356, height - 40);
@@ -230,32 +257,56 @@ export class UIScene extends Phaser.Scene {
     const occupants = this.state.creatures.filter((creature) => creature.alive && creature.destinationBuildingId === building.id);
     const active = occupants.filter((creature) => creature.isBeingServed).length;
     const queued = Math.max(0, occupants.length - active);
+    const operator = occupants.filter((creature) => creature.isBeingServed)
+      .sort((first, second) => buildingOperatorEfficiency(second, building) - buildingOperatorEfficiency(first, building))[0]
+      ?? this.state.creatures.find((creature) => creature.id === building.lastOperatorId);
+    const operatorBonus = operator ? Math.round((buildingOperatorEfficiency(operator, building) - 1) * 100) : 0;
+    const materials = materialDeliveryRatio(building);
     this.buildingName.setText(`${def.glyph}  ${buildingDisplayName(building).toUpperCase()}`);
     this.buildingLevel.setText(`LEVEL ${building.level} / 3`);
     const currentEffect = building.level >= 3 ? advancedUpgradeDescription(building) : building.level >= 2 ? upgradeDescription(building, building.upgradeBranch ?? 'quality').effect : def.effect;
-    this.buildingDetails.setText(`${def.description}\n\nCURRENT EFFECT\n${currentEffect}\n\nINFLUENCE ${building.influenceRadius}m  ·  DURABILITY ${Math.round(building.durability)}%`);
-    this.buildingActivity.setText(`SERVICE STATIONS  ${active} / ${buildingCapacity(building)}\nWAITING IN QUEUE  ${queued}\nFACILITY STATUS  ${building.constructing ? `CONSTRUCTION ${Math.floor(building.constructionProgress)}%` : building.active ? 'ACTIVE' : 'OFFLINE'}`);
+    this.buildingDetails.setText(`${def.description}\n\nCURRENT EFFECT\n${currentEffect}\nOUTPUT ×${buildingEffectMultiplier(building).toFixed(2)}  ·  POLLUTION ${buildingPollution(building).toFixed(2)}/s\nINFLUENCE ${building.influenceRadius}m  ·  DURABILITY ${Math.round(building.durability)}%`);
+    this.buildingActivity.setText(
+      `STATIONS ${active}/${buildingCapacity(building)}  ·  QUEUE ${queued}  ·  ${building.constructing ? `BUILD ${Math.floor(building.constructionProgress)}%` : building.active ? 'ACTIVE' : 'OFFLINE'}\n`
+      + `${building.constructing ? `MATERIALS ${Math.floor(materials * 100)}%  ·  WORK ${Math.floor(building.constructionWork)}%` : `OPERATOR ${operator?.name ?? 'NONE'}${operator ? `  ·  +${operatorBonus}%` : ''}`}\n`
+      + `BEST ROLE ${buildingOperatorLabel(building)}  ·  MAINTENANCE ${building.maintenanceFunded ? 'FUNDED' : building.maintenanceMode.toUpperCase()}`
+    );
+    (this.maintenanceButton.getByName('button-label') as Phaser.GameObjects.Text)?.setText(building.maintenanceMode === 'auto' ? 'AUTO MAINTENANCE' : 'MANUAL MAINTENANCE');
+    this.maintenanceButton.setAlpha(building.constructing ? 0.45 : 1);
+    if (building.constructing) this.maintenanceButton.disableInteractive(); else this.maintenanceButton.setInteractive({ useHandCursor: true });
+    const repairCost = maintenanceCost(building);
+    (this.repairButton.getByName('button-label') as Phaser.GameObjects.Text)?.setText(building.maintenanceFunded ? 'REPAIR FUNDED' : building.durability >= 100 ? 'FULL DURABILITY' : `REPAIR ${repairCost.glow}G/${repairCost.alloy}A`);
+    const repairReady = !building.constructing && !building.maintenanceFunded && building.durability < 100 && this.state.resources.glow >= repairCost.glow && this.state.resources.alloy >= repairCost.alloy;
+    this.repairButton.setAlpha(repairReady ? 1 : 0.42);
+    if (repairReady) this.repairButton.setInteractive({ useHandCursor: true }); else this.repairButton.disableInteractive();
     if (building.level >= 3) {
       this.buildingUpgradeCost.setText('MAXIMUM UPGRADE INSTALLED');
       this.upgradeButton.setAlpha(0.35).disableInteractive();
       this.capacityUpgradeButton.setAlpha(0.35).disableInteractive();
     } else if (building.level === 2) {
-      const cost = advancedUpgradeCost(building); const affordable = canAffordAdvancedUpgrade(this.state.resources, this.state.livingWorld, building);
+      const cost = advancedUpgradeCost(building); const availability = advancedUpgradeAvailability(this.state.resources, this.state.livingWorld, building);
+      const preview = advancedUpgradePreview(building);
       const rare = cost.wildSeed ? `${cost.wildSeed} WILD SEED` : `${cost.memoryCrystal} MEMORY CRYSTAL`;
-      this.buildingUpgradeCost.setText(`${advancedUpgradeDescription(building)}\nCOST ${cost.glow} GLOW · ${cost.alloy} ALLOY · ${rare}`);
+      this.buildingUpgradeCost.setText(`${preview.effect}\nCAP ${preview.capacityBefore}→${preview.capacityAfter} · OUTPUT ×${preview.outputBefore.toFixed(2)}→×${preview.outputAfter.toFixed(2)} · ~${preview.estimatedSeconds}s\nCOST ${cost.glow}G/${cost.alloy}A/${rare} · ${availability.ok ? preview.research : availability.reason}`);
       (this.upgradeButton.getByName('button-label') as Phaser.GameObjects.Text)?.setText('ASCEND TO III');
-      this.upgradeButton.setAlpha(affordable ? 1 : 0.48).setVisible(true);
-      if (affordable) this.upgradeButton.setInteractive({ useHandCursor: true }); else this.upgradeButton.disableInteractive();
+      this.upgradeButton.setAlpha(availability.ok ? 1 : 0.48).setVisible(true);
+      if (availability.ok) this.upgradeButton.setInteractive({ useHandCursor: true }); else this.upgradeButton.disableInteractive();
       this.capacityUpgradeButton.setVisible(false);
     } else {
-      const qualityCost = upgradeCost(building, 'quality'); const capacityCost = upgradeCost(building, 'capacity');
-      const qualityAffordable = canAffordUpgrade(this.state.resources, building, 'quality'); const capacityAffordable = canAffordUpgrade(this.state.resources, building, 'capacity');
-      this.buildingUpgradeCost.setText(`QUALITY: ${upgradeDescription(building, 'quality').effect} · ${qualityCost.glow}G/${qualityCost.alloy}A\nCAPACITY: ${upgradeDescription(building, 'capacity').effect} · ${capacityCost.glow}G/${capacityCost.alloy}A`);
+      const quality = upgradePreview(building, 'quality'); const capacity = upgradePreview(building, 'capacity');
+      const qualityAvailability = upgradeAvailability(this.state.resources, this.state.livingWorld, building, 'quality');
+      const capacityAvailability = upgradeAvailability(this.state.resources, this.state.livingWorld, building, 'capacity');
+      this.buildingUpgradeCost.setText(
+        `QUALITY · CAP ${quality.capacityBefore}→${quality.capacityAfter} · OUTPUT ×${quality.outputAfter.toFixed(2)} · POLLUTION ${quality.pollutionBefore.toFixed(2)}→${quality.pollutionAfter.toFixed(2)} · ~${quality.estimatedSeconds}s\n`
+        + `COST ${quality.cost.glow}G/${quality.cost.alloy}A · REQ ${qualityAvailability.ok ? quality.research : qualityAvailability.reason}\n`
+        + `CAPACITY · CAP ${capacity.capacityBefore}→${capacity.capacityAfter} · OUTPUT ×${capacity.outputAfter.toFixed(2)} · POLLUTION ${capacity.pollutionBefore.toFixed(2)}→${capacity.pollutionAfter.toFixed(2)} · ~${capacity.estimatedSeconds}s\n`
+        + `COST ${capacity.cost.glow}G/${capacity.cost.alloy}A · REQ ${capacityAvailability.ok ? capacity.research : capacityAvailability.reason}`
+      );
       (this.upgradeButton.getByName('button-label') as Phaser.GameObjects.Text)?.setText('QUALITY PATH');
       this.capacityUpgradeButton.setVisible(true);
-      this.upgradeButton.setAlpha(qualityAffordable ? 1 : 0.48); this.capacityUpgradeButton.setAlpha(capacityAffordable ? 1 : 0.48);
-      if (qualityAffordable) this.upgradeButton.setInteractive({ useHandCursor: true }); else this.upgradeButton.disableInteractive();
-      if (capacityAffordable) this.capacityUpgradeButton.setInteractive({ useHandCursor: true }); else this.capacityUpgradeButton.disableInteractive();
+      this.upgradeButton.setAlpha(qualityAvailability.ok ? 1 : 0.48); this.capacityUpgradeButton.setAlpha(capacityAvailability.ok ? 1 : 0.48);
+      if (qualityAvailability.ok) this.upgradeButton.setInteractive({ useHandCursor: true }); else this.upgradeButton.disableInteractive();
+      if (capacityAvailability.ok) this.capacityUpgradeButton.setInteractive({ useHandCursor: true }); else this.capacityUpgradeButton.disableInteractive();
     }
   }
   private updateObjective(state: WorldState) {
@@ -296,12 +347,23 @@ export class UIScene extends Phaser.Scene {
     if (advanced ? gameStore.advanceBuilding(building.id) : gameStore.upgradeBuilding(building.id, branch)) {
       this.showToast(`${advanced ? 'Ascendant' : branch === 'quality' ? 'Quality' : 'Capacity'} construction started · builders will carry the work`);
       this.game.events.emit('glitch', 0.22);
-    } else this.showToast(advanced ? 'This evolution needs regional rare matter and resources' : 'Not enough GLOW or ALLOY for this upgrade');
+    } else this.showToast(gameStore.actionError());
+  }
+  private toggleSelectedMaintenance() {
+    if (!this.selectedBuildingId) return;
+    const building = this.state.buildings.find((candidate) => candidate.id === this.selectedBuildingId); if (!building) return;
+    gameStore.setMaintenanceMode(building.id, building.maintenanceMode === 'auto' ? 'manual' : 'auto');
+    this.showToast(building.maintenanceMode === 'auto' ? 'Automatic maintenance disabled' : 'Automatic maintenance enabled at 55% durability');
+  }
+  private repairSelectedBuilding() {
+    if (!this.selectedBuildingId) return;
+    if (gameStore.requestMaintenance(this.selectedBuildingId)) this.showToast('Repair funded · a healthy Builder will restore the facility');
+    else this.showToast(gameStore.actionError());
   }
   private toggleBuildMenu() {
     if (this.buildMenu) { this.buildMenu.destroy(true); this.buildMenu = undefined; return; }
     const living = this.state.creatures.filter((c) => c.alive).length;
-    this.buildMenu = new BuildingMenu(this, this.scale.width / 2, this.scale.height / 2, living, (kind) => {
+    this.buildMenu = new BuildingMenu(this, this.scale.width / 2, this.scale.height / 2, living, totalResearch(this.state.livingWorld) > 0, (kind) => {
       this.buildMenu?.destroy(true); this.buildMenu = undefined; this.game.events.emit('build-select', kind); this.showToast(`Place ${BUILDINGS[kind].name} inside the habitat`);
     });
   }

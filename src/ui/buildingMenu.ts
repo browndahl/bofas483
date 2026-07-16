@@ -5,7 +5,7 @@ import { panel } from './hud';
 import { crisp, DISPLAY_FONT, UI_FONT } from './typography';
 
 export class BuildingMenu extends Phaser.GameObjects.Container {
-  constructor(scene: Phaser.Scene, x: number, y: number, population: number, onPick: (kind: BuildingKind) => void) {
+  constructor(scene: Phaser.Scene, x: number, y: number, population: number, researchUnlocked: boolean, onPick: (kind: BuildingKind) => void) {
     super(scene, x, y);
     scene.add.existing(this);
     this.setDepth(200);
@@ -29,8 +29,12 @@ export class BuildingMenu extends Phaser.GameObjects.Container {
       const glyph = crisp(scene.add.text(-cardWidth / 2 + 29, -1, unlocked ? def.glyph : '×', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '20px', color: unlocked ? Phaser.Display.Color.IntegerToColor(def.color).rgba : '#829b90' })).setOrigin(0.5);
       const title = crisp(scene.add.text(-cardWidth / 2 + 54, -entryHeight / 2 + 10, def.name.toUpperCase(), { fontFamily: DISPLAY_FONT, fontSize: compact ? '11px' : '12px', color: unlocked ? '#f0fff7' : '#91aa9f', letterSpacing: 0.5 }));
       const effect = crisp(scene.add.text(-cardWidth / 2 + 54, -entryHeight / 2 + 29, def.effect, { fontFamily: UI_FONT, fontSize: compact ? '10px' : '11px', color: unlocked ? '#b8d9c9' : '#8fa99d', lineSpacing: 1, wordWrap: { width: cardWidth - 78 } }));
-      const impactLabel = def.pollution > 0 ? ` · POLLUTION ${def.pollution}/sec` : ' · CLEAN';
-      const statsLabel = unlocked ? `COST ${def.cost.glow} GLOW / ${def.cost.alloy} ALLOY${impactLabel}` : `UNLOCKS AT ${def.unlockPopulation} LIVING LUMA`;
+      const impactLabel = def.pollution > 0 ? ` · ${compact ? 'P' : 'POLLUTION'} ${def.pollution}/s` : ' · CLEAN';
+      const statsLabel = unlocked
+        ? compact
+          ? `${def.cost.glow}G/${def.cost.alloy}A · ~19s · ${def.operatorRole.toUpperCase()}${impactLabel}`
+          : `COST ${def.cost.glow}G/${def.cost.alloy}A · ~19s · ${def.operatorRole.toUpperCase()} + ${def.operatorSkill.toUpperCase()}${impactLabel}`
+        : `UNLOCKS AT ${def.unlockPopulation} LIVING LUMA`;
       const stats = crisp(scene.add.text(-cardWidth / 2 + 54, entryHeight / 2 - 19, statsLabel, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: unlocked ? Phaser.Display.Color.IntegerToColor(def.color).rgba : '#789486' })).setOrigin(0, 1);
       const entry = scene.add.container(0, startY + index * entryHeight, [base, accent, glyph, title, effect, stats]).setSize(cardWidth, entryHeight - 7);
       if (unlocked) {
@@ -41,6 +45,6 @@ export class BuildingMenu extends Phaser.GameObjects.Container {
       } else entry.setAlpha(0.95);
       this.add(entry);
     });
-    this.add(crisp(scene.add.text(0, height / 2 - 16, 'Open GUIDE for full need thresholds, controls, and strategy.', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: '#9bc7b2' })).setOrigin(0.5, 1));
+    this.add(crisp(scene.add.text(0, height / 2 - 16, `${researchUnlocked ? 'UPGRADES READY' : 'UNLOCK ANY RESEARCH TO ENABLE LEVEL-2 UPGRADES'} · Open GUIDE for full strategy.`, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '11px', color: researchUnlocked ? '#7af6bd' : '#f7bd62' })).setOrigin(0.5, 1));
   }
 }

@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { advancedUpgradeCost, buildingCapacity, buildingEffectMultiplier, createBuilding, upgradeDescription } from '../src/simulation/building';
+import {
+  advancedUpgradeAvailability,
+  advancedUpgradeCost,
+  buildingCapacity,
+  buildingEffectMultiplier,
+  buildingOperatorEfficiency,
+  createBuilding,
+  upgradeAvailability,
+  upgradeDescription,
+  upgradePreview
+} from '../src/simulation/building';
 import { launchExpedition, resolveExpeditionDecision, updateExpeditions } from '../src/simulation/expeditions';
 import { updateLivingWorld, relationshipStage } from '../src/simulation/livingWorld';
 import { advanceOfflineWorld } from '../src/simulation/offlineProgress';
@@ -26,9 +36,44 @@ describe('living world progression', () => {
   it('offers distinct quality and capacity facility paths', () => {
     const building = createBuilding('wash-pool', 700, 500, 1); const base = buildingCapacity(building);
     expect(upgradeDescription(building, 'quality').effect).not.toBe(upgradeDescription(building, 'capacity').effect);
+    const quality = upgradePreview(building, 'quality'); const capacity = upgradePreview(building, 'capacity');
+    expect(quality.outputAfter).toBeGreaterThan(capacity.outputAfter);
+    expect(capacity.capacityAfter).toBeGreaterThan(quality.capacityAfter);
     building.level = 2; building.upgradeBranch = 'capacity';
     expect(buildingCapacity(building)).toBe(base + 2);
     expect(buildingEffectMultiplier(building)).toBeGreaterThan(1);
+  });
+
+  it('gates level-2 and ascendant construction behind understandable research', () => {
+    const world = createInitialWorld(17); world.resources = { glow: 500, alloy: 500 };
+    const building = createBuilding('nutrient-bed', 700, 500, 1);
+    expect(upgradeAvailability(world.resources, world.livingWorld, building, 'quality').reason).toContain('research');
+    world.livingWorld.research.exploration = 1;
+    expect(upgradeAvailability(world.resources, world.livingWorld, building, 'quality').ok).toBe(true);
+    building.level = 2; building.upgradeBranch = 'quality'; world.livingWorld.rareResources.wildSeed = 1;
+    expect(advancedUpgradeAvailability(world.resources, world.livingWorld, building).reason).toContain('NATURE 2');
+    world.livingWorld.research.nature = 2;
+    expect(advancedUpgradeAvailability(world.resources, world.livingWorld, building).ok).toBe(true);
+  });
+
+  it('rewards trained matching facility operators', () => {
+    const world = createInitialWorld(18); const building = createBuilding('clinic', 700, 500, 1); const creature = world.creatures[0];
+    creature.skills.healing = 82; creature.assignedRole = 'healer';
+    const matched = buildingOperatorEfficiency(creature, building);
+    creature.assignedRole = 'builder';
+    expect(matched).toBeGreaterThan(buildingOperatorEfficiency(creature, building));
+  });
+
+  it('rewards colonies that commit to a facility specialization path', () => {
+    const world = createInitialWorld(21);
+    world.buildings = (['nutrient-bed', 'wash-pool', 'resonance-garden'] as const).map((kind, index) => {
+      const building = createBuilding(kind, 500 + index * 180, 500, index + 1);
+      building.level = 2; building.upgradeBranch = 'quality'; return building;
+    });
+    updateLivingWorld(world, 1);
+    const milestone = world.livingWorld.challenges.find((challenge) => challenge.id === 'specialized-habitat');
+    expect(milestone?.complete).toBe(true);
+    expect(world.livingWorld.journal.some((entry) => entry.id === 'challenge-specialized-habitat')).toBe(true);
   });
 
   it('supports safe named expeditions, return decisions, and rare rewards', () => {
@@ -104,9 +149,20 @@ describe('living world progression', () => {
     expect(migrated?.livingWorld.expeditions).toEqual([]);
     expect(migrated?.livingWorld.personalRequests).toEqual([]);
     expect(migrated?.livingWorld.storyEvents).toEqual([]);
-    expect(migrated?.livingWorld.saveVersion).toBe(4);
+    expect(migrated?.livingWorld.saveVersion).toBe(5);
     expect(migrated?.creatures[0].history.length).toBeGreaterThan(0);
     expect(migrated?.creatures[0].voiceStyle).toBeTruthy();
+  });
+
+  it('migrates legacy facilities into the material and maintenance economy', () => {
+    const world = createInitialWorld(9); world.buildings.push(createBuilding('extractor', 700, 500, 1));
+    const legacy = structuredClone(world) as unknown as { buildings: Array<Record<string, unknown>> };
+    delete legacy.buildings[0].constructionWork; delete legacy.buildings[0].materialsRequired; delete legacy.buildings[0].materialsDelivered;
+    delete legacy.buildings[0].maintenanceMode; delete legacy.buildings[0].maintenanceFunded;
+    const migrated = parseWorldState(legacy);
+    expect(migrated?.buildings[0].constructionWork).toBe(100);
+    expect(migrated?.buildings[0].materialsRequired).toEqual({ glow: 0, alloy: 0 });
+    expect(migrated?.buildings[0].maintenanceMode).toBe('auto');
   });
 
   it('provides contextual return, baby, social, and critical vocalizations', () => {

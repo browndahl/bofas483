@@ -1,4 +1,14 @@
-import { buildingCapacity, buildingEffectMultiplier, buildingPollution, buildingStation, taskBuilding } from './building';
+import {
+  BUILDINGS,
+  buildingCapacity,
+  buildingEffectMultiplier,
+  buildingOperatorEfficiency,
+  buildingPollution,
+  buildingStation,
+  maintenanceCost,
+  materialDeliveryRatio,
+  taskBuilding
+} from './building';
 import { advanceReproduction, chooseTask, decayNeeds, divideCreature } from './creature';
 import { skillEfficiency, skillForTask, trainSkill } from './colonyLife';
 import { addJournal, ensureBuildingLife, ensureCreatureHistory, ensureLivingWorld, remember, researchBonus, updateCreatureHistory, updateLivingWorld } from './livingWorld';
@@ -65,7 +75,9 @@ function buildProjectAssignments(creatures: CreatureState[], tasks: Map<string, 
   const workers = creatures.filter((creature) => creature.alive && !creature.expeditionId && ['construct', 'maintain'].includes(tasks.get(creature.id) ?? ''))
     .sort((a, b) => b.personality.diligence - a.personality.diligence);
   for (const creature of workers) {
-    const task = tasks.get(creature.id); const candidates = task === 'construct' ? buildings.filter((building) => building.constructing) : buildings.filter((building) => !building.constructing && building.durability < 70);
+    const task = tasks.get(creature.id); const candidates = task === 'construct'
+      ? buildings.filter((building) => building.constructing)
+      : buildings.filter((building) => !building.constructing && building.maintenanceFunded && building.durability < 100);
     let chosen: BuildingState | undefined; let best = Number.POSITIVE_INFINITY;
     for (const building of candidates) {
       const load = loads.get(building.id) ?? 0; const score = Math.hypot(building.x - creature.x, building.y - creature.y) + load * 180;
@@ -337,11 +349,22 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
   ensureLivingWorld(next); next.creatures.forEach(ensureCreatureHistory); next.buildings.forEach(ensureBuildingLife);
   next.time += seconds;
   const natureProtection = researchBonus(next, 'nature');
-  const sources = next.buildings.map((building) => ({ x: building.x, y: building.y, amount: buildingPollution(building) / natureProtection }));
+  const sources = next.buildings.filter((building) => building.active && !building.constructing)
+    .map((building) => ({ x: building.x, y: building.y, amount: buildingPollution(building) / natureProtection }));
   next.pollution = spreadPollution(next.pollution, next.pollutionWidth, next.pollutionHeight, sources, seconds);
   const buildingsByKind = new Map<BuildingKind, BuildingState[]>();
   next.buildings.forEach((building) => {
-    if (building.active && !building.constructing) building.durability = Math.max(0, building.durability - seconds * (building.kind === 'extractor' ? 0.009 : 0.0035));
+    if (building.active && !building.constructing) {
+      building.durability = Math.max(0, building.durability - seconds * (building.kind === 'extractor' ? 0.009 : 0.0035));
+      if (building.durability <= 0) building.active = false;
+    }
+    if (!building.constructing && building.maintenanceMode === 'auto' && building.durability < 55 && !building.maintenanceFunded) {
+      const cost = maintenanceCost(building);
+      if (next.resources.glow >= cost.glow && next.resources.alloy >= cost.alloy) {
+        next.resources.glow -= cost.glow; next.resources.alloy -= cost.alloy; building.maintenanceFunded = true;
+        appendWorldEvent(next, { type: 'maintenance_funded', at: next.time, payload: { buildingId: building.id, automatic: true, glow: cost.glow, alloy: cost.alloy } });
+      }
+    }
     if (!building.active) return;
     const group = buildingsByKind.get(building.kind) ?? [];
     group.push(building); buildingsByKind.set(building.kind, group);
@@ -427,22 +450,55 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
     }
     const destinationDistance = Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y);
     if (building && service?.serving && destinationDistance < 12) {
-      const skill = skillForTask(task);
       const preference = creature.preferences.favoriteBuilding === building.kind ? 1.05 : 1;
-      const efficiency = buildingEffectMultiplier(building) * preference * (skill ? skillEfficiency(creature, skill) : 1);
+      const operatorEfficiency = ['construct', 'maintain'].includes(task) ? 1 : buildingOperatorEfficiency(creature, building);
+      const efficiency = buildingEffectMultiplier(building) * preference * operatorEfficiency;
+      if (!['construct', 'maintain'].includes(task)) building.lastOperatorId = creature.id;
       const careBonus = researchBonus(next, 'care');
       if (task === 'eat') creature.needs.hunger = Math.min(100, creature.needs.hunger + 16 * efficiency * careBonus * seconds);
       if (task === 'bathe') creature.needs.hygiene = Math.min(100, creature.needs.hygiene + 19 * efficiency * careBonus * seconds);
       if (task === 'play') creature.needs.happiness = Math.min(100, creature.needs.happiness + 14 * efficiency * seconds);
-      if (task === 'sleep') creature.needs.energy = Math.min(100, creature.needs.energy + 20 * efficiency * seconds);
+      if (task === 'sleep') {
+        creature.needs.energy = Math.min(100, creature.needs.energy + 20 * efficiency * seconds);
+        if (building.level >= 2 && building.upgradeBranch === 'quality') {
+          creature.needs.happiness = Math.min(100, creature.needs.happiness + 1.2 * seconds);
+          creature.reproduction = Math.min(100, creature.reproduction + 0.08 * seconds);
+        }
+      }
       if (task === 'heal') { creature.needs.health = Math.min(100, creature.needs.health + 8 * efficiency * careBonus * seconds); creature.exposure = Math.max(0, creature.exposure - 5 * efficiency * careBonus * seconds); }
       if (task === 'work') { next.resources.alloy += 0.8 * efficiency * seconds; next.resources.glow += 0.35 * efficiency * seconds; creature.needs.happiness = Math.max(0, creature.needs.happiness - 0.9 * seconds); }
       if (task === 'construct') {
-        const before = building.constructionProgress; building.constructionProgress = Math.min(100, building.constructionProgress + 6.5 * skillEfficiency(creature, 'building') * researchBonus(next, 'technology') * seconds);
+        const before = building.constructionProgress;
+        const builderEfficiency = skillEfficiency(creature, 'building') * (creature.assignedRole === 'builder' ? 1.12 : 1) * researchBonus(next, 'technology');
+        const workDelta = 5.4 * builderEfficiency * seconds;
+        const deliveryDelta = 7.2 * builderEfficiency * seconds;
+        building.constructionWork = Math.min(100, building.constructionWork + workDelta);
+        const required = building.materialsRequired;
+        building.materialsDelivered.glow = Math.min(required.glow, building.materialsDelivered.glow + required.glow * deliveryDelta / 100);
+        building.materialsDelivered.alloy = Math.min(required.alloy, building.materialsDelivered.alloy + required.alloy * deliveryDelta / 100);
+        building.constructionProgress = Math.min(building.constructionWork, materialDeliveryRatio(building) * 100);
         trainSkill(creature, 'building', seconds, 1.4);
-        if (before < 100 && building.constructionProgress >= 100) { building.constructing = false; building.active = true; building.durability = 100; appendWorldEvent(next, { type: 'construction_complete', at: next.time, payload: { buildingId: building.id, kind: building.kind } }); addJournal(next, { category: 'milestone', title: `${building.kind} construction complete`, detail: `${creature.name} finished the final connection.` }); }
+        if (before < 100 && building.constructionProgress >= 100) {
+          building.constructing = false; building.active = true; building.durability = 100; building.constructionKind = undefined;
+          building.materialsDelivered = { ...building.materialsRequired };
+          appendWorldEvent(next, { type: 'construction_complete', at: next.time, payload: { buildingId: building.id, kind: building.kind, level: building.level, branch: building.upgradeBranch } });
+          addJournal(next, { category: 'milestone', title: `${BUILDINGS[building.kind].name} construction complete`, detail: `${creature.name} delivered the final materials and brought level ${building.level} online.` });
+        }
       }
-      if (task === 'maintain') { building.durability = Math.min(100, building.durability + 7 * skillEfficiency(creature, 'building') * seconds); trainSkill(creature, 'building', seconds, 1.15); }
+      if (task === 'maintain') {
+        const before = building.durability;
+        building.durability = Math.min(100, building.durability + 7 * skillEfficiency(creature, 'building') * seconds);
+        building.active = true; trainSkill(creature, 'building', seconds, 1.15);
+        if (before < 100 && building.durability >= 100) {
+          building.maintenanceFunded = false;
+          appendWorldEvent(next, { type: 'maintenance_complete', at: next.time, payload: { buildingId: building.id, creatureId: creature.id } });
+          addJournal(next, { category: 'milestone', title: `${BUILDINGS[building.kind].name} restored`, detail: `${creature.name} completed a funded maintenance cycle.` });
+        }
+      }
+      if (!['construct', 'maintain'].includes(task)) {
+        const operatorSkill = BUILDINGS[building.kind].operatorSkill;
+        if (operatorSkill !== skillForTask(task)) trainSkill(creature, operatorSkill, seconds, 0.45);
+      }
       trainAndCelebrate(next, creature, task, seconds, building.level >= 2 ? 1.12 : 1);
     }
     if (creature.reproduction >= 100 && next.creatures.length + newborns.length < 250) newborns.push(divideCreature(creature, next));
