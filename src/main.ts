@@ -13,6 +13,7 @@ import { GuideScene } from './scenes/GuideScene';
 import { AwaySummaryScene } from './scenes/AwaySummaryScene';
 import { ColonyScene } from './scenes/ColonyScene';
 import { RecoveryScene } from './scenes/RecoveryScene';
+import { clearAuthRedirectError, parseAuthRedirectError } from './services/authRedirect';
 import { gameStore } from './state/gameStateStore';
 import { saveService } from './services/saveService';
 import './style.css';
@@ -30,6 +31,9 @@ window.addEventListener('worker-error', (event) => Sentry.captureException(new E
 window.addEventListener('unhandledrejection', (event) => Sentry.captureException(event.reason));
 registerSW({ immediate: true });
 
+const authRedirectNotice = parseAuthRedirectError(window.location.href);
+if (authRedirectNotice) window.history.replaceState({}, document.title, clearAuthRedirectError(window.location.href));
+
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'app',
@@ -42,6 +46,7 @@ const game = new Phaser.Game({
   dom: { createContainer: true },
   scene: [BootScene, PreloadScene, WorldScene, UIScene, DialogueScene, ProfileScene, GlitchOverlayScene, AuthScene, GuideScene, AwaySummaryScene, ColonyScene, RecoveryScene]
 });
+if (authRedirectNotice) game.registry.set('auth-redirect-notice', authRedirectNotice.message);
 
 const restored = saveService.loadLocalWithProgress();
 if (restored?.version === 1) gameStore.set(restored);
