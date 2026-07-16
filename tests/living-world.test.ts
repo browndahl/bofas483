@@ -19,7 +19,7 @@ import { createInitialWorld, makeCreature } from '../src/simulation/worldState';
 import { parseWorldState } from '../src/simulation/worldSchema';
 import { relationshipTone, resolvePersonalRequest, resolveStoryChoice, updateColonyStories } from '../src/simulation/colonyStories';
 import { creaturePose, presentationBudget, soundscapeMood, soundscapeNotes } from '../src/rendering/presentation';
-import { canSpendReserve, colonyForecast, colonyJobQueue, managedTask, schedulePhase } from '../src/simulation/colonyManagement';
+import { applyManagementPreset, canSpendReserve, colonyForecast, colonyJobQueue, directOrderTask, managedTask, schedulePhase } from '../src/simulation/colonyManagement';
 
 describe('living world progression', () => {
   it('advances day, season, reputation, research, and regional permits', () => {
@@ -152,7 +152,7 @@ describe('living world progression', () => {
     expect(migrated?.livingWorld.personalRequests).toEqual([]);
     expect(migrated?.livingWorld.storyEvents).toEqual([]);
     expect(migrated?.livingWorld.settings.musicVolume).toBeGreaterThan(0);
-    expect(migrated?.livingWorld.saveVersion).toBe(7);
+    expect(migrated?.livingWorld.saveVersion).toBe(8);
     expect(migrated?.creatures[0].history.length).toBeGreaterThan(0);
     expect(migrated?.creatures[0].voiceStyle).toBeTruthy();
   });
@@ -173,7 +173,7 @@ describe('living world progression', () => {
     delete legacy.livingWorld.settings.musicVolume; legacy.livingWorld.saveVersion = 5;
     const migrated = parseWorldState(legacy);
     expect(migrated?.livingWorld.settings.musicVolume).toBe(0.3);
-    expect(migrated?.livingWorld.saveVersion).toBe(7);
+    expect(migrated?.livingWorld.saveVersion).toBe(8);
   });
 
   it('migrates colony management, schedules, crews, and staffing preferences', () => {
@@ -190,7 +190,9 @@ describe('living world progression', () => {
     expect(migrated?.creatures[0].schedule).toBe('balanced');
     expect(migrated?.creatures[0].managementGroupId).toBeTruthy();
     expect(migrated?.buildings[0].preferredOperatorIds).toEqual([]);
-    expect(migrated?.livingWorld.saveVersion).toBe(7);
+    expect(migrated?.livingWorld.saveVersion).toBe(8);
+    expect(migrated?.creatures[0].customSchedule).toHaveLength(8);
+    expect(migrated?.livingWorld.management.metrics).toEqual([]);
   });
 
   it('forecasts capacity and produces an explainable work queue', () => {
@@ -221,6 +223,31 @@ describe('living world progression', () => {
     expect(managedTask(world, creature, 'work').task).toBe('eat');
     creature.needs.hunger = 90; creature.shiftWork = 90; world.livingWorld.dayTime = 0.5;
     expect(['sleep', 'play']).toContain(managedTask(world, creature, 'work').task);
+  });
+
+  it('supports custom daily blocks and management presets', () => {
+    const world = createInitialWorld(116); const creature = world.creatures[0];
+    creature.schedule = 'custom'; creature.customSchedule = ['rest', 'free', 'work', 'work', 'free', 'rest', 'rest', 'free'];
+    expect(schedulePhase(0.3, creature.schedule, creature.customSchedule)).toBe('work');
+    applyManagementPreset(world, 'emergency');
+    expect(world.livingWorld.management.activePreset).toBe('emergency');
+    expect(world.livingWorld.management.priorities.construction).toBe(0);
+    expect(world.livingWorld.management.policies.protectReserves).toBe(false);
+  });
+
+  it('turns direct map orders into explainable simulation tasks', () => {
+    const world = createInitialWorld(117); const creature = world.creatures[0];
+    const extractor = createBuilding('extractor', 700, 500, 1); world.buildings.push(extractor);
+    creature.directOrder = { kind: 'operate', buildingId: extractor.id, issuedAt: 0, expiresAt: 60 };
+    expect(directOrderTask(world, creature)).toEqual({ task: 'work', reason: 'Direct order: operate Deep Taker' });
+    expect(managedTask(world, creature, 'wander').task).toBe('work');
+  });
+
+  it('records bounded production and wellbeing history', () => {
+    const world = createInitialWorld(118);
+    for (let index = 0; index < 60; index++) { world.time = index * 10; updateLivingWorld(world, 1); }
+    expect(world.livingWorld.management.metrics).toHaveLength(48);
+    expect(world.livingWorld.management.metrics.at(-1)?.averageNeed).toBeGreaterThan(0);
   });
 
   it('provides contextual return, baby, social, and critical vocalizations', () => {

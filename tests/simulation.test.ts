@@ -285,6 +285,23 @@ describe('environment and navigation', () => {
     const next = tickWorld(world, 0.2); const zone = next.livingWorld.management.zones.find((candidate) => candidate.id === 'north-grove')!;
     expect(Math.hypot(next.creatures[0].target.x - zone.x, next.creatures[0].target.y - zone.y)).toBeLessThanOrEqual(zone.radius);
   });
+  it('routes a direct operate order to its selected facility', () => {
+    const world = createInitialWorld(47); world.livingWorld.dayTime = 0.5;
+    const first = createBuilding('extractor', 620, 500, 1); const ordered = createBuilding('extractor', 880, 500, 2);
+    world.buildings.push(first, ordered); world.creatures[0].needs = { hunger: 90, hygiene: 90, happiness: 90, health: 100, energy: 90 };
+    world.creatures[0].directOrder = { kind: 'operate', buildingId: ordered.id, issuedAt: 0, expiresAt: 60 };
+    const next = tickWorld(world, 0.2);
+    expect(next.creatures[0].task).toBe('work');
+    expect(next.creatures[0].destinationBuildingId).toBe(ordered.id);
+    expect(next.creatures[0].lastTaskReason).toContain('Direct order');
+  });
+  it('completes a direct movement order and returns to autonomy', () => {
+    const world = createInitialWorld(48); const creature = world.creatures[0];
+    creature.directOrder = { kind: 'move', issuedAt: 0, expiresAt: 60, target: { x: creature.x, y: creature.y } };
+    const next = tickWorld(world, 0.2);
+    expect(next.creatures[0].directOrder).toBeUndefined();
+    expect(next.creatures[0].lastTaskReason).toContain('completed');
+  });
 });
 
 describe('state integrity', () => {

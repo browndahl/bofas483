@@ -8,9 +8,10 @@ import {
   weatherAmbienceFrequency
 } from '../rendering/presentation';
 import { BUILDINGS, buildingCapacity, buildingDisplayName, materialDeliveryRatio } from '../simulation/building';
+import { COLONY_OVERLAYS } from '../simulation/colonyManagement';
 import { personalityLabels } from '../simulation/personality';
 import { contextualVocalization, voicePitch, type CreatureMood, type VoiceContext } from '../simulation/vocalization';
-import type { BuildingKind, BuildingState, CreatureState, WorldState } from '../simulation/worldState';
+import type { BuildingKind, BuildingState, CreatureState, DirectOrderKind, WorldState } from '../simulation/worldState';
 import { gameStore } from '../state/gameStateStore';
 import { crisp, DISPLAY_FONT, UI_FONT } from '../ui/typography';
 
@@ -58,6 +59,12 @@ export class WorldScene extends Phaser.Scene {
   private relationshipGraphics!: Phaser.GameObjects.Graphics;
   private pathGraphics!: Phaser.GameObjects.Graphics;
   private weatherGraphics!: Phaser.GameObjects.Graphics;
+  private managementGraphics!: Phaser.GameObjects.Graphics;
+  private managementLabels: Phaser.GameObjects.Text[] = [];
+  private managementToolbar?: Phaser.GameObjects.Container;
+  private managementToolbarText?: Phaser.GameObjects.Text;
+  private managementOrderMode?: DirectOrderKind;
+  private managementDragId?: string;
   private dayOverlay!: Phaser.GameObjects.Rectangle;
   private selectedId = 'c1';
   private unsubscribe?: () => void;
@@ -102,9 +109,11 @@ export class WorldScene extends Phaser.Scene {
     this.pollutionGraphics = this.add.graphics().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
     this.relationshipGraphics = this.add.graphics().setDepth(8).setBlendMode(Phaser.BlendModes.ADD);
     this.pathGraphics = this.add.graphics().setDepth(1);
+    this.managementGraphics = this.add.graphics().setDepth(9).setBlendMode(Phaser.BlendModes.ADD);
     this.weatherGraphics = this.add.graphics().setDepth(4).setBlendMode(Phaser.BlendModes.ADD);
     this.dayOverlay = this.add.rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_WIDTH, WORLD_HEIGHT, 0x08152a, 0).setDepth(40).setBlendMode(Phaser.BlendModes.MULTIPLY);
     this.configureInput();
+    this.createManagementToolbar();
     for (let i = 0; i < 42; i++) this.effectPool.push(this.add.rectangle(0, 0, 5, 5, 0x7af6bd, 0).setDepth(18));
     for (let i = 0; i < 32; i++) this.footprintPool.push(this.add.rectangle(0, 0, 6, 3, 0x4b3e25, 0).setDepth(6));
     this.unsubscribe = gameStore.subscribe((state) => { this.state = state; this.syncState(state); });
@@ -173,7 +182,7 @@ export class WorldScene extends Phaser.Scene {
         this.lastPinchDistance = distance;
       } else this.lastPinchDistance = 0;
     });
-    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer, gameObjects: Phaser.GameObjects.GameObject[]) => {
       if (pointer.button === 2) { this.cancelPlacement(); this.dragging = false; return; }
       if (this.placementKind && this.placementGhost) {
         const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
@@ -185,13 +194,20 @@ export class WorldScene extends Phaser.Scene {
         } else {
           this.game.events.emit('toast', pointer.y <= 58 || pointer.y >= this.scale.height - 66 ? 'Place it away from interface controls' : placement.reason ?? 'Invalid building site');
         }
+      } else if (this.managementOrderMode && !gameObjects.length && pointer.getDistance() < 8 && pointer.y > (this.scale.width < 650 ? 190 : 130) && pointer.y < this.scale.height - 66) {
+        const point = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+        this.applyManagementOrder(point.x, point.y);
       }
       this.dragging = false;
     });
     this.input.on('wheel', (pointer: Phaser.Input.Pointer, _objects: unknown[], _dx: number, dy: number) => {
       this.zoomAt(pointer.x, pointer.y, this.cameras.main.zoom - dy * 0.001);
     });
-    this.input.keyboard?.on('keydown-ESC', () => this.cancelPlacement());
+    this.input.keyboard?.on('keydown-ESC', () => {
+      if (this.managementOrderMode) {
+        this.managementOrderMode = undefined; this.refreshManagementToolbar(); this.game.events.emit('toast', 'Direct order mode cleared');
+      } else this.cancelPlacement();
+    });
     this.input.keyboard?.on('keydown-P', () => this.togglePhotoMode());
     this.input.keyboard?.on('keydown-SPACE', () => gameStore.togglePause());
     this.input.keyboard?.on('keydown-ONE', () => gameStore.updateSetting('simulationSpeed', 1));
@@ -199,6 +215,46 @@ export class WorldScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-THREE', () => gameStore.updateSetting('simulationSpeed', 4));
     this.input.keyboard?.on('keydown-G', () => this.scene.launch('GuideScene'));
     this.input.keyboard?.on('keydown-U', () => this.game.events.emit('toast', gameStore.undoLastBuild() ? 'Recent construction undone · 80% of materials returned' : 'Nothing recent is safe to undo'));
+    this.input.keyboard?.on('keydown-O', () => this.cycleManagementOverlay());
+    this.input.keyboard?.on('keydown-R', () => this.cycleManagementOrder());
+    this.input.keyboard?.on('keydown-X', () => {
+      if (gameStore.clearDirectOrder(this.selectedId)) this.game.events.emit('toast', 'Selected Luma returned to autonomy');
+    });
+  }
+  private createManagementToolbar() {
+    const background = this.add.rectangle(0, 0, 390, 34, 0x231c12, 0.9).setStrokeStyle(1, 0xf7bd62, 0.65);
+    const text = crisp(this.add.text(0, 0, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#fff0ba', align: 'center' })).setOrigin(0.5);
+    this.managementToolbarText = text;
+    this.managementToolbar = this.add.container(this.scale.width - 206, 104, [background, text]).setDepth(102).setScrollFactor(0).setInteractive(new Phaser.Geom.Rectangle(-195, -17, 390, 34), Phaser.Geom.Rectangle.Contains);
+    this.managementToolbar.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.x < this.scale.width - 205) this.cycleManagementOverlay();
+      else this.cycleManagementOrder();
+    });
+    this.refreshManagementToolbar();
+  }
+  private refreshManagementToolbar() {
+    this.managementToolbar?.setPosition(Math.max(206, this.scale.width - 206), this.scale.width < 650 ? 154 : 104);
+    this.managementToolbarText?.setText(`OVERLAY ${this.state.livingWorld.management.overlay.toUpperCase()} [O]  ·  ORDER ${(this.managementOrderMode ?? 'none').toUpperCase()} [R]  ·  CLEAR [X]`);
+  }
+  private cycleManagementOverlay() {
+    const current = COLONY_OVERLAYS.indexOf(this.state.livingWorld.management.overlay);
+    gameStore.setManagementOverlay(COLONY_OVERLAYS[(current + 1) % COLONY_OVERLAYS.length]);
+  }
+  private cycleManagementOrder() {
+    const orders: Array<DirectOrderKind | undefined> = [undefined, 'move', 'operate', 'construct', 'maintain', 'rest', 'recreate'];
+    const current = orders.indexOf(this.managementOrderMode);
+    this.managementOrderMode = orders[(current + 1) % orders.length];
+    if (this.managementOrderMode) gameStore.setManagementOverlay('orders');
+    this.refreshManagementToolbar();
+    this.game.events.emit('toast', this.managementOrderMode ? `${this.managementOrderMode.toUpperCase()} order armed · select a Luma, then click a target` : 'Direct order mode cleared');
+  }
+  private applyManagementOrder(x: number, y: number, building?: BuildingState) {
+    if (!this.managementOrderMode) return false;
+    const targetBuilding = building ?? this.state.buildings.filter((candidate) => Math.hypot(candidate.x - x, candidate.y - y) < 95).sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))[0];
+    const options = this.managementOrderMode === 'move' ? { target: { x, y } } : { buildingId: targetBuilding?.id };
+    const ok = gameStore.issueDirectOrder(this.selectedId, this.managementOrderMode, options);
+    this.game.events.emit('toast', ok ? `${this.managementOrderMode.toUpperCase()} order assigned` : gameStore.actionError());
+    return ok;
   }
   private zoomAt(screenX: number, screenY: number, requestedZoom: number) {
     const camera = this.cameras.main;
@@ -212,6 +268,7 @@ export class WorldScene extends Phaser.Scene {
   }
   private handleResize = () => {
     if (this.scale.width < 650 || this.cameras.main.zoom < 0.7) this.cameras.main.setZoom(this.baseZoom());
+    this.refreshManagementToolbar();
   };
   private handleCare = (need: 'hunger' | 'hygiene' | 'happiness') => {
     if (gameStore.care(this.selectedId, need)) { this.soundPulse(need === 'hunger' ? 220 : need === 'hygiene' ? 420 : 620, 200); this.game.events.emit('care-effect', need); }
@@ -272,6 +329,7 @@ export class WorldScene extends Phaser.Scene {
     const thoughtText = crisp(this.add.text(0, 0, '', { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: '#2c2417', backgroundColor: '#fff3c4', padding: { x: 7, y: 4 }, align: 'center' })).setOrigin(0.5);
     const thought = this.add.container(0, -69, [thoughtTail, thoughtText]).setVisible(false);
     const container = this.add.container(creature.x, creature.y, [shadow, actor, label, thought]).setSize(82, 110).setDepth(10).setInteractive({ useHandCursor: true });
+    this.input.setDraggable(container, this.state.livingWorld.management.overlay === 'orders');
     const serial = Number(creature.id.replace(/\D/g, '')) || 1;
     const view: CreatureView = {
       container, actor, pose, shadow, aura, selection, body, eyes, gesture, status, label, thought, thoughtText,
@@ -296,6 +354,26 @@ export class WorldScene extends Phaser.Scene {
         const answer = this.state.creatures.filter((candidate) => candidate.alive && candidate.id !== current.id && Math.hypot(candidate.x - current.x, candidate.y - current.y) < 240).sort((a, b) => (b.bonds[current.id] ?? 0) - (a.bonds[current.id] ?? 0))[0];
         if (answer && (answer.bonds[current.id] ?? 0) > 18) this.time.delayedCall(280, () => this.voiceCreature(answer, 'answer'));
       }
+    });
+    container.on('dragstart', () => {
+      if (this.state.livingWorld.management.overlay !== 'orders') return;
+      this.managementDragId = creature.id; this.dragging = false; container.setDepth(25);
+    });
+    container.on('drag', (_pointer: Phaser.Input.Pointer, dragX: number, dragY: number) => {
+      if (this.managementDragId !== creature.id) return;
+      container.setPosition(dragX, dragY);
+    });
+    container.on('dragend', () => {
+      if (this.managementDragId !== creature.id) return;
+      this.managementDragId = undefined; container.setDepth(10);
+      const current = this.state.creatures.find((candidate) => candidate.id === creature.id) ?? creature;
+      const building = this.state.buildings.filter((candidate) => candidate.active && !candidate.constructing)
+        .sort((a, b) => Math.hypot(a.x - container.x, a.y - container.y) - Math.hypot(b.x - container.x, b.y - container.y))[0];
+      if (building && Math.hypot(building.x - container.x, building.y - container.y) < 120) {
+        if (!building.preferredOperatorIds.includes(creature.id)) gameStore.togglePreferredOperator(building.id, creature.id);
+        this.game.events.emit('toast', `${current.name} is now preferred staff at ${BUILDINGS[building.kind].name}`);
+      } else this.game.events.emit('toast', 'Drop the Luma directly on an active facility to assign preferred staff');
+      container.setPosition(current.x, current.y);
     });
     return view;
   }
@@ -478,6 +556,10 @@ export class WorldScene extends Phaser.Scene {
     const container = this.add.container(building.x, building.y, [shadow, halo, art, activity, core, glyph, level, name]).setDepth(7).setSize(120, 104).setInteractive({ useHandCursor: true }).setData('level', building.level);
     container.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (pointer.getDistance() < 8 && !this.placementKind) {
+        if (this.managementOrderMode) {
+          this.applyManagementOrder(building.x, building.y, building);
+          return;
+        }
         this.audioUnlocked = true; this.playBuildingSound(building.kind);
         this.game.events.emit('building-selected', this.state.buildings.find((candidate) => candidate.id === building.id));
       }
@@ -493,6 +575,7 @@ export class WorldScene extends Phaser.Scene {
     state.creatures.forEach((creature) => {
       let view = this.views.get(creature.id);
       if (!view) { view = this.createCreatureView(creature); this.views.set(creature.id, view); }
+      this.input.setDraggable(view.container, state.livingWorld.management.overlay === 'orders');
       view.container.setVisible(!creature.expeditionId);
       if (view.lastAlive && !creature.alive) { if (state.livingWorld.settings.screenShake) this.cameras.main.shake(400, 0.006); this.game.events.emit('glitch', state.livingWorld.settings.reducedMotion ? 0.25 : 0.9); }
       if (view.lastName !== creature.name) { view.lastName = creature.name; this.voiceCreature(creature, 'rename'); }
@@ -518,7 +601,64 @@ export class WorldScene extends Phaser.Scene {
       if (building) view.container.setData('signature', `${building.level}:${building.upgradeBranch ?? ''}:${Math.floor(building.constructionProgress / 10)}:${Math.floor(materialDeliveryRatio(building) * 5)}:${Math.floor(building.durability / 10)}:${building.maintenanceFunded}`);
     });
     this.drawPaths(state);
+    this.drawManagementOverlay(state);
     this.drawPollution(state);
+  }
+  private drawManagementOverlay(state: WorldState) {
+    this.managementGraphics.clear();
+    this.managementLabels.forEach((label) => label.destroy()); this.managementLabels = [];
+    const overlay = state.livingWorld.management.overlay;
+    const view = this.cameras.main.worldView;
+    const visibleAt = (x: number, y: number, margin = 160) => x >= view.left - margin && x <= view.right + margin && y >= view.top - margin && y <= view.bottom + margin;
+    this.refreshManagementToolbar();
+    if (overlay === 'none') return;
+    const label = (x: number, y: number, value: string, color: number) => {
+      const node = crisp(this.add.text(x, y, value, { fontFamily: UI_FONT, fontStyle: 'bold', fontSize: '10px', color: Phaser.Display.Color.IntegerToColor(color).rgba, backgroundColor: '#241b12dd', padding: { x: 5, y: 3 }, align: 'center' })).setOrigin(0.5).setDepth(12);
+      this.managementLabels.push(node);
+    };
+    if (overlay === 'zones') {
+      state.livingWorld.management.zones.forEach((zone) => {
+        this.managementGraphics.fillStyle(zone.color, 0.045).fillCircle(zone.x, zone.y, zone.radius);
+        this.managementGraphics.lineStyle(4, zone.color, 0.48).strokeCircle(zone.x, zone.y, zone.radius);
+        const group = state.livingWorld.management.groups.find((candidate) => candidate.zoneId === zone.id);
+        const population = state.creatures.filter((creature) => creature.alive && creature.managementGroupId === group?.id).length;
+        label(zone.x, zone.y - zone.radius + 18, `${zone.name.toUpperCase()} · ${population} LUMA\nEDIT ZONE IN COLONY → MANAGE → MAP`, zone.color);
+      });
+    }
+    if (overlay === 'capacity') {
+      state.buildings.filter((building) => visibleAt(building.x, building.y, building.influenceRadius)).slice(0, 120).forEach((building) => {
+        const color = BUILDINGS[building.kind].color; const waiting = state.creatures.filter((creature) => creature.destinationBuildingId === building.id && !creature.isBeingServed).length;
+        this.managementGraphics.fillStyle(color, 0.035).fillCircle(building.x, building.y, building.influenceRadius);
+        this.managementGraphics.lineStyle(waiting ? 5 : 3, waiting >= 3 ? 0xff735f : color, waiting ? 0.58 : 0.3).strokeCircle(building.x, building.y, building.influenceRadius);
+        label(building.x, building.y - 72, `${buildingDisplayName(building).toUpperCase()}\nCAP ${buildingCapacity(building)} · QUEUE ${waiting} · DUR ${Math.round(building.durability)}%`, waiting >= 3 ? 0xff735f : color);
+      });
+    }
+    if (overlay === 'traffic') {
+      state.creatures.filter((creature) => creature.alive && creature.navigationPath.length && visibleAt(creature.x, creature.y)).slice(0, 120).forEach((creature) => {
+        const points = [{ x: creature.x, y: creature.y }, ...creature.navigationPath];
+        this.managementGraphics.lineStyle(creature.stuckTimer > 1 ? 5 : 2, creature.stuckTimer > 1 ? 0xff735f : 0x65c7ff, creature.stuckTimer > 1 ? 0.8 : 0.24);
+        this.managementGraphics.beginPath(); points.forEach((point, index) => index ? this.managementGraphics.lineTo(point.x, point.y) : this.managementGraphics.moveTo(point.x, point.y)); this.managementGraphics.strokePath();
+        if (creature.stuckTimer > 1 || creature.id === this.selectedId) {
+          const destination = creature.destinationBuildingId ? state.buildings.find((building) => building.id === creature.destinationBuildingId) : undefined;
+          label(creature.x, creature.y - 72, creature.stuckTimer > 1
+            ? `${creature.name.toUpperCase()} · ROUTE DELAYED\n${destination ? `${buildingDisplayName(destination)} queue/approach is congested` : 'No open path; automatic recovery is retrying'}`
+            : `${creature.name.toUpperCase()} · ${creature.task.toUpperCase()}\n${creature.lastTaskReason}`, creature.stuckTimer > 1 ? 0xff735f : 0x65c7ff);
+        }
+      });
+      state.buildings.filter((building) => visibleAt(building.x, building.y)).slice(0, 120).forEach((building) => {
+        const waiting = state.creatures.filter((creature) => creature.destinationBuildingId === building.id && !creature.isBeingServed).length;
+        if (waiting) this.managementGraphics.fillStyle(waiting >= 3 ? 0xff735f : 0xf7bd62, Math.min(0.45, waiting * 0.1)).fillCircle(building.x, building.y, 44 + waiting * 8);
+      });
+    }
+    if (overlay === 'orders') {
+      state.creatures.filter((creature) => creature.alive && (creature.directOrder || creature.id === this.selectedId)).forEach((creature) => {
+        const targetBuilding = creature.directOrder?.buildingId ? state.buildings.find((building) => building.id === creature.directOrder?.buildingId) : undefined;
+        const target = creature.directOrder?.target ?? targetBuilding ?? creature.target;
+        this.managementGraphics.lineStyle(4, creature.id === this.selectedId ? 0xfff0a8 : 0xbf78ff, 0.72).lineBetween(creature.x, creature.y, target.x, target.y);
+        this.managementGraphics.fillStyle(0xfff0a8, 0.8).fillCircle(target.x, target.y, 7);
+        if (creature.directOrder) label(creature.x, creature.y - 74, `${creature.name.toUpperCase()} · ${creature.directOrder.kind.toUpperCase()}\n${creature.lastTaskReason}`, 0xfff0a8);
+      });
+    }
   }
   private drawRelationships() {
     this.relationshipGraphics.clear();
@@ -791,7 +931,7 @@ export class WorldScene extends Phaser.Scene {
     this.state.creatures.forEach((creature, index) => {
       const view = this.views.get(creature.id); if (!view) return;
       const dx = creature.x - view.container.x; const dy = creature.y - view.container.y;
-      view.container.x += dx * smoothing; view.container.y += dy * smoothing;
+      if (this.managementDragId !== creature.id) { view.container.x += dx * smoothing; view.container.y += dy * smoothing; }
       const inView = view.container.x > camera.worldView.left - 100 && view.container.x < camera.worldView.right + 100 && view.container.y > camera.worldView.top - 100 && view.container.y < camera.worldView.bottom + 100;
       view.container.setVisible(inView && !creature.expeditionId);
       view.label.setVisible(inView && ((camera.zoom > 0.68 && this.state.creatures.length < 90) || creature.id === this.selectedId));
@@ -843,6 +983,8 @@ export class WorldScene extends Phaser.Scene {
     this.scale.off('resize', this.handleResize, this);
     this.input.keyboard?.off('keydown-ESC');
     this.input.keyboard?.off('keydown-P'); this.input.keyboard?.off('keydown-SPACE'); this.input.keyboard?.off('keydown-ONE'); this.input.keyboard?.off('keydown-TWO'); this.input.keyboard?.off('keydown-THREE'); this.input.keyboard?.off('keydown-G'); this.input.keyboard?.off('keydown-U');
+    this.input.keyboard?.off('keydown-O'); this.input.keyboard?.off('keydown-R');
+    this.input.keyboard?.off('keydown-X');
     this.cancelPlacement(false);
     if (this.audioContext && this.audioContext.state !== 'closed') void this.audioContext.close();
     this.audioContext = undefined;

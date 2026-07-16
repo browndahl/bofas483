@@ -33,7 +33,13 @@ const creature = z.object({
   parentId: z.string().max(40).optional(), childrenIds: z.array(z.string().max(40)).max(32).optional(), mentorId: z.string().max(40).optional(),
   favoriteFood: z.string().max(60).optional(), favoriteCompanionId: z.string().max(40).optional(), routeMemory: z.array(vec2).max(12).optional(),
   voiceStyle: z.enum(['chirpy', 'round', 'whispery', 'raspy', 'musical']).optional(), voiceCooldown: finite.nonnegative().optional(), ageMilestone: z.number().int().min(0).optional(), currentConcern: z.string().max(120).optional(), expeditionId: z.string().max(80).optional(),
-  schedule: z.enum(['balanced', 'early', 'late', 'flexible']).optional(), managementGroupId: z.string().max(40).optional(), shiftWork: finite.nonnegative().optional(), lastTaskReason: z.string().max(180).optional()
+  schedule: z.enum(['balanced', 'early', 'late', 'flexible', 'custom']).optional(),
+  customSchedule: z.array(z.enum(['rest', 'free', 'work'])).length(8).optional(),
+  managementGroupId: z.string().max(40).optional(), shiftWork: finite.nonnegative().optional(), lastTaskReason: z.string().max(180).optional(),
+  directOrder: z.object({
+    kind: z.enum(['move', 'operate', 'construct', 'maintain', 'rest', 'recreate']), issuedAt: finite.nonnegative(), expiresAt: finite.nonnegative(),
+    buildingId: z.string().max(40).optional(), target: vec2.optional()
+  }).optional()
 });
 const building = z.object({
   id: z.string().min(1).max(40), kind: z.enum(['nutrient-bed', 'wash-pool', 'resonance-garden', 'nest', 'extractor', 'clinic']),
@@ -65,7 +71,14 @@ const management = z.object({
   minimumReserves: z.object({ glow: finite.nonnegative(), alloy: finite.nonnegative() }),
   zones: z.array(z.object({ id: z.string().max(40), name: z.string().max(60), kind: z.enum(['home', 'work', 'recreation']), x: finite, y: finite, radius: finite.min(80).max(500), color: z.number().int().nonnegative() })).max(8),
   groups: z.array(z.object({ id: z.string().max(40), name: z.string().max(60), color: z.number().int().nonnegative(), zoneId: z.string().max(40) })).max(8),
-  autoFundRepairsBelow: finite.min(5).max(80)
+  autoFundRepairsBelow: finite.min(5).max(80),
+  overlay: z.enum(['none', 'zones', 'capacity', 'traffic', 'orders']).optional(),
+  activePreset: z.enum(['balanced', 'emergency', 'growth', 'relaxed', 'custom']).optional(),
+  tutorialStep: z.number().int().min(0).max(10).optional(),
+  metrics: z.array(z.object({
+    at: finite.nonnegative(), glow: finite.nonnegative(), alloy: finite.nonnegative(), population: z.number().int().nonnegative(),
+    queued: z.number().int().nonnegative(), averageNeed: finite.min(0).max(100)
+  })).max(48).optional()
 });
 const livingWorld = z.object({
   reputation: finite.nonnegative(), level: z.number().int().min(1).max(5), title: z.string().max(100), researchPoints: finite.nonnegative(), research,

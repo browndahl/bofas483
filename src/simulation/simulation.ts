@@ -61,7 +61,8 @@ function buildServiceAssignments(world: WorldState, creatures: CreatureState[], 
     .sort((a, b) => taskUrgency(world, b, tasks.get(b.id) ?? 'wander') - taskUrgency(world, a, tasks.get(a.id) ?? 'wander') || a.id.localeCompare(b.id));
   for (const creature of waiting) {
     const kind = taskBuilding[tasks.get(creature.id) ?? 'wander'];
-    const candidates = kind ? buildingsByKind.get(kind) ?? [] : [];
+    const orderedBuilding = creature.directOrder?.buildingId ? buildings.find((building) => building.id === creature.directOrder?.buildingId) : undefined;
+    const candidates = orderedBuilding && orderedBuilding.kind === kind ? [orderedBuilding] : kind ? buildingsByKind.get(kind) ?? [] : [];
     let chosen: BuildingState | undefined; let bestScore = Number.POSITIVE_INFINITY;
     for (const building of candidates) {
       const load = loads.get(building.id) ?? 0;
@@ -86,11 +87,15 @@ function buildProjectAssignments(world: WorldState, creatures: CreatureState[], 
     .sort((a, b) => {
       const aPriority = priorityForTask(world, tasks.get(a.id) ?? 'wander'); const bPriority = priorityForTask(world, tasks.get(b.id) ?? 'wander');
       return bPriority - aPriority || b.personality.diligence - a.personality.diligence;
-    });
+  });
   for (const creature of workers) {
-    const task = tasks.get(creature.id); const candidates = task === 'construct'
+    const task = tasks.get(creature.id);
+    const orderedBuilding = creature.directOrder?.buildingId ? buildings.find((building) => building.id === creature.directOrder?.buildingId) : undefined;
+    const orderedCandidates = orderedBuilding && ((task === 'construct' && orderedBuilding.constructing) || (task === 'maintain' && orderedBuilding.maintenanceFunded))
+      ? [orderedBuilding] : undefined;
+    const candidates = orderedCandidates ?? (task === 'construct'
       ? buildings.filter((building) => building.constructing)
-      : buildings.filter((building) => !building.constructing && building.maintenanceFunded && building.durability < 100);
+      : buildings.filter((building) => !building.constructing && building.maintenanceFunded && building.durability < 100));
     let chosen: BuildingState | undefined; let best = Number.POSITIVE_INFINITY;
     for (const building of candidates) {
       const load = loads.get(building.id) ?? 0; const score = Math.hypot(building.x - creature.x, building.y - creature.y) + load * 180;
@@ -409,9 +414,14 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
   const taskReasons = new Map<string, string>();
   const taskPlans = new Map(next.creatures.filter((creature) => creature.alive && !creature.expeditionId).map((creature) => {
     const urgent = Math.min(creature.needs.health, creature.needs.hunger, creature.needs.hygiene, creature.needs.energy) < 34;
+    const decision = managedTask(next, creature, chooseTask(creature, next.buildings));
+    if ((creature.directOrder && creature.directOrder.expiresAt > next.time) || decision.reason.startsWith('Emergency-first')) {
+      taskReasons.set(creature.id, decision.reason);
+      return [creature.id, decision.task] as const;
+    }
     if (groupMembers.has(creature.id) && !urgent) { taskReasons.set(creature.id, 'Colony-wide group activity'); return [creature.id, 'celebrate'] as const; }
     if (socialPlans.has(creature.id)) { taskReasons.set(creature.id, 'Relationship need and available companion'); return [creature.id, socialPlans.get(creature.id)!.task] as const; }
-    const decision = managedTask(next, creature, chooseTask(creature, next.buildings)); taskReasons.set(creature.id, decision.reason);
+    taskReasons.set(creature.id, decision.reason);
     return [creature.id, decision.task] as const;
   }));
   const serviceAssignments = buildServiceAssignments(next, next.creatures, taskPlans, buildingsByKind, next.buildings);
@@ -420,7 +430,7 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
   const newborns: CreatureState[] = [];
   next.creatures = next.creatures.map((creature) => {
     if (!creature.alive || creature.expeditionId) return creature;
-    const socialPlan = socialPlans.get(creature.id);
+    const socialPlan = creature.directOrder && creature.directOrder.expiresAt > next.time ? undefined : socialPlans.get(creature.id);
     const task = taskPlans.get(creature.id) ?? chooseTask(creature, next.buildings);
     creature.task = task;
     creature.lastTaskReason = taskReasons.get(creature.id) ?? 'Responding to current colony conditions';
@@ -449,7 +459,9 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
     } else {
       if (creature.destinationCreatureId || SOCIAL_TASKS.has(creature.task) || creature.socialTarget) clearSocialState(creature);
       creature.destinationBuildingId = undefined; creature.destinationCreatureId = undefined;
-      if (Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y) < 14 || creature.navigationPath.length === 0) {
+      if (creature.directOrder?.kind === 'move' && creature.directOrder.target) {
+        creature.target = { ...creature.directOrder.target };
+      } else if (Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y) < 14 || creature.navigationPath.length === 0) {
         const serial = Number(creature.id.replace(/\D/g, '')) || 1;
         const theta = ((next.seed + creature.age * 19 + serial * 41) % 628) / 100;
         const zone = creatureZone(next, creature); const radius = zone ? zone.radius * (0.35 + creature.personality.curiosity * 0.5) : 120 + creature.personality.curiosity * 105;
@@ -471,6 +483,12 @@ export function tickWorld(world: WorldState, seconds: number): WorldState {
       else if (task === 'wander') creature.target = { x: creature.x, y: creature.y };
     }
     const destinationDistance = Math.hypot(creature.target.x - creature.x, creature.target.y - creature.y);
+    if (creature.directOrder?.kind === 'move' && destinationDistance < 14) {
+      creature.directOrder = undefined;
+      creature.lastTaskReason = 'Direct move completed; returning to colony autonomy';
+    } else if (creature.directOrder && creature.directOrder.expiresAt <= next.time) {
+      creature.directOrder = undefined;
+    }
     if (building && service?.serving && destinationDistance < 12) {
       const preference = creature.preferences.favoriteBuilding === building.kind ? 1.05 : 1;
       const operatorEfficiency = ['construct', 'maintain'].includes(task) ? 1 : buildingOperatorEfficiency(creature, building);

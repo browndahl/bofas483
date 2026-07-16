@@ -13,16 +13,20 @@ import {
 import { expeditionResearchCost, launchExpedition, resolveExpeditionDecision } from '../simulation/expeditions';
 import { resolvePersonalRequest, resolveStoryChoice } from '../simulation/colonyStories';
 import { addJournal, RESEARCH_BRANCHES } from '../simulation/livingWorld';
+import { applyManagementPreset } from '../simulation/colonyManagement';
 import { recoverSilentColony } from '../simulation/recovery';
 import type {
   BuildingKind,
+  ColonyOverlay,
   ColonyPolicyKey,
+  DirectOrderKind,
   CreatureRole,
   CreatureSchedule,
   CreatureState,
   ExpeditionChoice,
   GameSettings,
   ManagementPriorityKey,
+  ManagementPreset,
   NeedKey,
   PersonalRequestChoice,
   RegionId,
@@ -150,6 +154,13 @@ class GameStateStore {
     creature.schedule = schedule; creature.history.push({ at: next.time, title: `${schedule} schedule`, detail: 'The colony adjusted this Luma’s protected work, free-time, and rest blocks.' });
     appendWorldEvent(next, { type: 'schedule_assignment', at: next.time, payload: { creatureId: id, schedule } }); this.set(next); return true;
   }
+  setCustomScheduleBlock(id: string, block: number, phase: 'rest' | 'free' | 'work') {
+    const next = structuredClone(this.state); const creature = next.creatures.find((candidate) => candidate.id === id && candidate.alive);
+    if (!creature || block < 0 || block > 7) return false;
+    creature.customSchedule[block] = phase; creature.schedule = 'custom';
+    appendWorldEvent(next, { type: 'custom_schedule', at: next.time, payload: { creatureId: id, block, phase } });
+    this.set(next); return true;
+  }
   setCreatureGroup(id: string, groupId: string) {
     const next = structuredClone(this.state); const creature = next.creatures.find((candidate) => candidate.id === id && candidate.alive);
     const group = next.livingWorld.management.groups.find((candidate) => candidate.id === groupId); if (!creature || !group) return false;
@@ -157,16 +168,64 @@ class GameStateStore {
     appendWorldEvent(next, { type: 'management_group', at: next.time, payload: { creatureId: id, groupId } }); this.set(next); return true;
   }
   setManagementPriority(key: ManagementPriorityKey, priority: 0 | 1 | 2 | 3) {
-    const next = structuredClone(this.state); next.livingWorld.management.priorities[key] = priority;
+    const next = structuredClone(this.state); next.livingWorld.management.priorities[key] = priority; next.livingWorld.management.activePreset = 'custom';
     appendWorldEvent(next, { type: 'management_priority', at: next.time, payload: { key, priority } }); this.set(next); return true;
   }
   setColonyPolicy(key: ColonyPolicyKey, enabled: boolean) {
-    const next = structuredClone(this.state); next.livingWorld.management.policies[key] = enabled;
+    const next = structuredClone(this.state); next.livingWorld.management.policies[key] = enabled; next.livingWorld.management.activePreset = 'custom';
     appendWorldEvent(next, { type: 'colony_policy', at: next.time, payload: { key, enabled } }); this.set(next); return true;
   }
   setMinimumReserves(glow: number, alloy: number) {
-    const next = structuredClone(this.state); next.livingWorld.management.minimumReserves = { glow: Math.max(0, glow), alloy: Math.max(0, alloy) };
+    const next = structuredClone(this.state); next.livingWorld.management.minimumReserves = { glow: Math.max(0, glow), alloy: Math.max(0, alloy) }; next.livingWorld.management.activePreset = 'custom';
     appendWorldEvent(next, { type: 'reserve_policy', at: next.time, payload: { glow, alloy } }); this.set(next); return true;
+  }
+  setManagementOverlay(overlay: ColonyOverlay) {
+    const next = structuredClone(this.state); next.livingWorld.management.overlay = overlay;
+    next.livingWorld.management.tutorialStep = Math.max(next.livingWorld.management.tutorialStep, 1);
+    this.set(next); return true;
+  }
+  applyManagementPreset(preset: Exclude<ManagementPreset, 'custom'>) {
+    const next = structuredClone(this.state); applyManagementPreset(next, preset);
+    next.livingWorld.management.tutorialStep = Math.max(next.livingWorld.management.tutorialStep, 2);
+    appendWorldEvent(next, { type: 'management_preset', at: next.time, payload: { preset } });
+    this.set(next); return true;
+  }
+  adjustZone(id: string, changes: Partial<Pick<WorldState['livingWorld']['management']['zones'][number], 'x' | 'y' | 'radius'>>) {
+    const next = structuredClone(this.state); const zone = next.livingWorld.management.zones.find((candidate) => candidate.id === id); if (!zone) return false;
+    zone.x = Math.max(120, Math.min(1480, changes.x ?? zone.x));
+    zone.y = Math.max(120, Math.min(880, changes.y ?? zone.y));
+    zone.radius = Math.max(100, Math.min(420, changes.radius ?? zone.radius));
+    next.livingWorld.management.tutorialStep = Math.max(next.livingWorld.management.tutorialStep, 3);
+    appendWorldEvent(next, { type: 'management_zone', at: next.time, payload: { id, x: zone.x, y: zone.y, radius: zone.radius } });
+    this.set(next); return true;
+  }
+  issueDirectOrder(creatureId: string, kind: DirectOrderKind, options: { buildingId?: string; target?: { x: number; y: number } } = {}) {
+    const next = structuredClone(this.state); const creature = next.creatures.find((candidate) => candidate.id === creatureId && candidate.alive && !candidate.expeditionId);
+    const building = options.buildingId ? next.buildings.find((candidate) => candidate.id === options.buildingId) : undefined;
+    if (!creature) { this.lastActionError = 'Select a living Luma first'; return false; }
+    if (['operate', 'construct', 'maintain'].includes(kind) && !building) { this.lastActionError = 'Choose a facility for this order'; return false; }
+    if (kind === 'operate' && (!building?.active || building.constructing)) { this.lastActionError = 'That facility is not ready to operate'; return false; }
+    if (kind === 'construct' && !building?.constructing) { this.lastActionError = 'That facility is not under construction'; return false; }
+    if (kind === 'maintain' && building) {
+      if (building.constructing) { this.lastActionError = 'Finish construction before repairs'; return false; }
+      if (!building.maintenanceFunded && building.durability < 100) {
+        const cost = maintenanceCost(building);
+        if (next.resources.glow < cost.glow || next.resources.alloy < cost.alloy) { this.lastActionError = `Repairs need ${cost.glow} GLOW and ${cost.alloy} ALLOY`; return false; }
+        next.resources.glow -= cost.glow; next.resources.alloy -= cost.alloy; building.maintenanceFunded = true;
+      }
+      if (building.durability >= 100) { this.lastActionError = 'That facility does not need repairs'; return false; }
+    }
+    creature.directOrder = { kind, issuedAt: next.time, expiresAt: next.time + (kind === 'move' ? 45 : 75), buildingId: building?.id, target: options.target };
+    creature.lastTaskReason = `Direct order received: ${kind}`;
+    next.livingWorld.management.overlay = 'orders';
+    next.livingWorld.management.tutorialStep = Math.max(next.livingWorld.management.tutorialStep, 4);
+    appendWorldEvent(next, { type: 'direct_order', at: next.time, payload: { creatureId, kind, buildingId: building?.id, target: options.target } });
+    this.lastActionError = ''; this.set(next); return true;
+  }
+  clearDirectOrder(creatureId: string) {
+    const next = structuredClone(this.state); const creature = next.creatures.find((candidate) => candidate.id === creatureId); if (!creature) return false;
+    creature.directOrder = undefined; creature.lastTaskReason = 'Direct order cleared; choosing autonomously';
+    this.set(next); return true;
   }
   togglePreferredOperator(buildingId: string, creatureId: string) {
     const next = structuredClone(this.state); const building = next.buildings.find((candidate) => candidate.id === buildingId);

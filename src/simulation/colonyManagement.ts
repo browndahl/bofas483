@@ -2,12 +2,15 @@ import { BUILDINGS, buildingCapacity, maintenanceCost } from './building';
 import type {
   BuildingState,
   ColonyManagementState,
+  ColonyOverlay,
   ColonyPolicyKey,
   ColonyZone,
   CreatureSchedule,
   CreatureState,
   JobQueueEntry,
   ManagementPriorityKey,
+  ManagementPreset,
+  Resources,
   SchedulePhase,
   TaskType,
   WorldState
@@ -15,7 +18,8 @@ import type {
 
 export const MANAGEMENT_PRIORITY_KEYS: ManagementPriorityKey[] = ['medical', 'food', 'cleanliness', 'rest', 'morale', 'maintenance', 'construction', 'industry'];
 export const COLONY_POLICY_KEYS: ColonyPolicyKey[] = ['emergencyFirst', 'repairBeforeConstruction', 'protectReserves', 'autoStaff'];
-export const CREATURE_SCHEDULES: CreatureSchedule[] = ['balanced', 'early', 'late', 'flexible'];
+export const CREATURE_SCHEDULES: CreatureSchedule[] = ['balanced', 'early', 'late', 'flexible', 'custom'];
+export const COLONY_OVERLAYS: ColonyOverlay[] = ['none', 'zones', 'capacity', 'traffic', 'orders'];
 
 export const MANAGEMENT_LABELS: Record<ManagementPriorityKey, string> = {
   medical: 'MEDICAL', food: 'FOOD', cleanliness: 'CLEANLINESS', rest: 'REST', morale: 'MORALE',
@@ -39,7 +43,11 @@ export function createColonyManagement(): ColonyManagementState {
       { id: 'maker-shift', name: 'Maker Shift', color: 0xf7bd62, zoneId: 'central-field' },
       { id: 'free-chorus', name: 'Free Chorus', color: 0xbf78ff, zoneId: 'south-meadow' }
     ],
-    autoFundRepairsBelow: 35
+    autoFundRepairsBelow: 35,
+    overlay: 'none',
+    activePreset: 'balanced',
+    tutorialStep: 0,
+    metrics: []
   };
 }
 
@@ -56,6 +64,8 @@ export function ensureColonyManagement(world: WorldState) {
   };
   world.creatures.forEach((creature, index) => {
     creature.schedule ??= 'balanced';
+    creature.customSchedule ??= ['rest', 'rest', 'free', 'work', 'work', 'work', 'free', 'rest'];
+    if (creature.customSchedule.length !== 8) creature.customSchedule = [...defaultsSchedule];
     creature.managementGroupId ??= defaults.groups[index % defaults.groups.length].id;
     creature.shiftWork ??= 0;
     creature.lastTaskReason ??= 'Choosing freely from current needs';
@@ -63,7 +73,10 @@ export function ensureColonyManagement(world: WorldState) {
   world.buildings.forEach((building) => { building.preferredOperatorIds ??= []; });
 }
 
-export function schedulePhase(dayTime: number, schedule: CreatureSchedule): SchedulePhase {
+const defaultsSchedule: SchedulePhase[] = ['rest', 'rest', 'free', 'work', 'work', 'work', 'free', 'rest'];
+
+export function schedulePhase(dayTime: number, schedule: CreatureSchedule, customSchedule = defaultsSchedule): SchedulePhase {
+  if (schedule === 'custom') return customSchedule[Math.min(7, Math.floor(dayTime * 8))] ?? 'free';
   if (schedule === 'flexible') return 'free';
   const shifted = (dayTime + (schedule === 'early' ? 0.08 : schedule === 'late' ? -0.1 : 0) + 1) % 1;
   if (shifted < 0.2 || shifted >= 0.86) return 'rest';
@@ -94,7 +107,9 @@ export function managedTask(world: WorldState, creature: CreatureState, baseTask
   const management = world.livingWorld.management;
   const urgent = urgentTask(creature, world.buildings);
   if (urgent && management.policies.emergencyFirst) return { task: urgent, reason: `Emergency-first policy: ${urgent} need is critical` };
-  const phase = schedulePhase(world.livingWorld.dayTime, creature.schedule);
+  const order = directOrderTask(world, creature);
+  if (order) return order;
+  const phase = schedulePhase(world.livingWorld.dayTime, creature.schedule, creature.customSchedule);
   const construction = world.buildings.some((building) => building.constructing);
   const maintenance = world.buildings.some((building) => building.maintenanceFunded && building.durability < 100);
   const canWork = creature.needs.energy > 42 && creature.needs.hunger > 48 && creature.needs.health > 48;
@@ -113,6 +128,56 @@ export function managedTask(world: WorldState, creature: CreatureState, baseTask
   }
   if (priorityForTask(world, baseTask) === 0 && !urgent) return { task: 'wander', reason: `${TASK_PRIORITY[baseTask] ?? baseTask} priority is disabled` };
   return { task: baseTask, reason: urgent ? `Critical ${urgent} need overrides the schedule` : `Schedule ${phase}: ${baseTask} priority ${priorityForTask(world, baseTask)}` };
+}
+
+export const MANAGEMENT_PRESETS: Record<Exclude<ManagementPreset, 'custom'>, {
+  priorities: ColonyManagementState['priorities'];
+  policies: ColonyManagementState['policies'];
+  minimumReserves: Resources;
+}> = {
+  balanced: {
+    priorities: { medical: 3, food: 3, cleanliness: 2, rest: 3, morale: 2, maintenance: 2, construction: 2, industry: 1 },
+    policies: { emergencyFirst: true, repairBeforeConstruction: true, protectReserves: true, autoStaff: true },
+    minimumReserves: { glow: 24, alloy: 12 }
+  },
+  emergency: {
+    priorities: { medical: 3, food: 3, cleanliness: 3, rest: 3, morale: 1, maintenance: 2, construction: 0, industry: 0 },
+    policies: { emergencyFirst: true, repairBeforeConstruction: true, protectReserves: false, autoStaff: true },
+    minimumReserves: { glow: 0, alloy: 0 }
+  },
+  growth: {
+    priorities: { medical: 2, food: 3, cleanliness: 2, rest: 2, morale: 2, maintenance: 1, construction: 3, industry: 3 },
+    policies: { emergencyFirst: true, repairBeforeConstruction: false, protectReserves: true, autoStaff: true },
+    minimumReserves: { glow: 12, alloy: 6 }
+  },
+  relaxed: {
+    priorities: { medical: 3, food: 2, cleanliness: 2, rest: 3, morale: 3, maintenance: 2, construction: 1, industry: 0 },
+    policies: { emergencyFirst: true, repairBeforeConstruction: true, protectReserves: true, autoStaff: false },
+    minimumReserves: { glow: 36, alloy: 18 }
+  }
+};
+
+export function applyManagementPreset(world: WorldState, preset: Exclude<ManagementPreset, 'custom'>) {
+  const definition = MANAGEMENT_PRESETS[preset];
+  world.livingWorld.management.priorities = { ...definition.priorities };
+  world.livingWorld.management.policies = { ...definition.policies };
+  world.livingWorld.management.minimumReserves = { ...definition.minimumReserves };
+  world.livingWorld.management.activePreset = preset;
+}
+
+export function directOrderTask(world: WorldState, creature: CreatureState): { task: TaskType; reason: string } | undefined {
+  const order = creature.directOrder;
+  if (!order || order.expiresAt <= world.time) return undefined;
+  if (order.kind === 'move') return { task: 'wander', reason: 'Direct order: move to the marked map position' };
+  if (order.kind === 'rest') return { task: 'sleep', reason: 'Direct order: take a protected rest break' };
+  if (order.kind === 'recreate') return { task: 'play', reason: 'Direct order: restore morale' };
+  if (order.kind === 'construct') return { task: 'construct', reason: 'Direct order: complete the selected construction site' };
+  if (order.kind === 'maintain') return { task: 'maintain', reason: 'Direct order: repair the selected facility' };
+  const building = world.buildings.find((candidate) => candidate.id === order.buildingId);
+  const tasks: Partial<Record<BuildingState['kind'], TaskType>> = {
+    'nutrient-bed': 'eat', 'wash-pool': 'bathe', 'resonance-garden': 'play', nest: 'sleep', extractor: 'work', clinic: 'heal'
+  };
+  return { task: building ? tasks[building.kind] ?? 'work' : 'work', reason: `Direct order: operate ${building ? BUILDINGS[building.kind].name : 'the selected facility'}` };
 }
 
 export function creatureZone(world: WorldState, creature: CreatureState) {
@@ -162,6 +227,17 @@ export function colonyForecast(world: WorldState): ColonyForecast {
     resourceNet: { glowPerMinute: extractors * 21 - maintenanceDrain, alloyPerMinute: extractors * 48 - maintenanceDrain * 0.45 },
     staffing: { preferred, assigned }
   };
+}
+
+export function forecastExplanations(world: WorldState) {
+  const forecast = colonyForecast(world);
+  const notes: string[] = [];
+  if (forecast.food.status !== 'stable') notes.push(`FOOD ${forecast.food.status.toUpperCase()}: ${forecast.food.demand} projected stations versus ${forecast.food.capacity} online. Add a Dew Loom or Capacity upgrade.`);
+  if (forecast.beds.status !== 'stable') notes.push(`REST ${forecast.beds.status.toUpperCase()}: ${forecast.beds.demand} projected stations versus ${forecast.beds.capacity} online. Stagger schedules or expand Warm Archives.`);
+  if (forecast.clinics.demand > forecast.clinics.capacity) notes.push(`CARE SHORTAGE: ${forecast.clinics.demand} at-risk Luma versus ${forecast.clinics.capacity} treatment stations. Reduce pollution or expand Mending Prisms.`);
+  if (forecast.resourceNet.glowPerMinute < 0 || forecast.resourceNet.alloyPerMinute < 0) notes.push('RESOURCE DECLINE: funded maintenance is consuming more than active industry is forecast to replace.');
+  if (forecast.staffing.preferred > forecast.staffing.assigned) notes.push(`STAFFING GAP: ${forecast.staffing.preferred - forecast.staffing.assigned} preferred assignments are currently unavailable or off shift.`);
+  return notes.length ? notes : ['All forecast systems are stable. Current capacity, staffing, and reserves cover projected demand.'];
 }
 
 export function colonyJobQueue(world: WorldState): JobQueueEntry[] {
