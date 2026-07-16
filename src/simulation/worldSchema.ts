@@ -51,7 +51,7 @@ const personality = z.object({
 const event = z.object({ type: z.string().min(1).max(80), at: finite, payload: z.record(z.unknown()) });
 const research = z.object({ care: z.number().int().min(0).max(5), nature: z.number().int().min(0).max(5), technology: z.number().int().min(0).max(5), society: z.number().int().min(0).max(5), exploration: z.number().int().min(0).max(5) });
 const settings = z.object({
-  muted: z.boolean(), voiceVolume: finite.min(0).max(1), ambienceVolume: finite.min(0).max(1), textScale: finite.min(0.8).max(1.5), highContrast: z.boolean(), colorBlind: z.boolean(),
+  muted: z.boolean(), voiceVolume: finite.min(0).max(1), ambienceVolume: finite.min(0).max(1), musicVolume: finite.min(0).max(1).optional(), textScale: finite.min(0.8).max(1.5), highContrast: z.boolean(), colorBlind: z.boolean(),
   reducedMotion: z.boolean(), screenShake: z.boolean(), lowPower: z.boolean(), quality: z.enum(['low', 'medium', 'high']), offlineLimitMinutes: z.number().int().min(0).max(240),
   simulationSpeed: z.union([z.literal(1), z.literal(2), z.literal(4)]), paused: z.boolean(), subtitles: z.boolean(), tutorial: z.boolean(), alertLevel: z.enum(['critical', 'important', 'all'])
 });

@@ -18,6 +18,7 @@ import { contextualVocalization } from '../src/simulation/vocalization';
 import { createInitialWorld, makeCreature } from '../src/simulation/worldState';
 import { parseWorldState } from '../src/simulation/worldSchema';
 import { relationshipTone, resolvePersonalRequest, resolveStoryChoice, updateColonyStories } from '../src/simulation/colonyStories';
+import { creaturePose, presentationBudget, soundscapeMood, soundscapeNotes } from '../src/rendering/presentation';
 
 describe('living world progression', () => {
   it('advances day, season, reputation, research, and regional permits', () => {
@@ -149,7 +150,8 @@ describe('living world progression', () => {
     expect(migrated?.livingWorld.expeditions).toEqual([]);
     expect(migrated?.livingWorld.personalRequests).toEqual([]);
     expect(migrated?.livingWorld.storyEvents).toEqual([]);
-    expect(migrated?.livingWorld.saveVersion).toBe(5);
+    expect(migrated?.livingWorld.settings.musicVolume).toBeGreaterThan(0);
+    expect(migrated?.livingWorld.saveVersion).toBe(6);
     expect(migrated?.creatures[0].history.length).toBeGreaterThan(0);
     expect(migrated?.creatures[0].voiceStyle).toBeTruthy();
   });
@@ -165,10 +167,42 @@ describe('living world progression', () => {
     expect(migrated?.buildings[0].maintenanceMode).toBe('auto');
   });
 
+  it('adds adaptive music controls to an existing living-world save', () => {
+    const legacy = structuredClone(createInitialWorld(12)) as unknown as { livingWorld: { settings: Record<string, unknown>; saveVersion: number } };
+    delete legacy.livingWorld.settings.musicVolume; legacy.livingWorld.saveVersion = 5;
+    const migrated = parseWorldState(legacy);
+    expect(migrated?.livingWorld.settings.musicVolume).toBe(0.3);
+    expect(migrated?.livingWorld.saveVersion).toBe(6);
+  });
+
   it('provides contextual return, baby, social, and critical vocalizations', () => {
     const baby = makeCreature('c8', 500, 500, 1); baby.age = 2;
     const lines = (['return', 'birth', 'social', 'critical'] as const).map((context, index) => contextualVocalization(baby, index, context).text);
     expect(new Set(lines).size).toBe(4); expect(lines.every((line) => line.length > 2)).toBe(true);
+  });
+
+  it('selects expressive task poses and scales presentation cost for large colonies', () => {
+    const creature = makeCreature('c4', 500, 500); creature.task = 'celebrate';
+    const celebration = creaturePose(creature, false);
+    creature.task = 'sleep'; creature.needs.energy = 18;
+    const sleep = creaturePose(creature, false);
+    expect(celebration.gesture).toBe('cheer'); expect(celebration.bob).toBeGreaterThan(sleep.bob);
+    const world = createInitialWorld(44);
+    const high = presentationBudget(world.livingWorld.settings, 20);
+    const crowded = presentationBudget(world.livingWorld.settings, 200);
+    expect(crowded.animationStride).toBeGreaterThan(high.animationStride);
+    expect(crowded.weatherParticles).toBeLessThan(high.weatherParticles);
+  });
+
+  it('chooses adaptive, deterministic music states', () => {
+    const world = createInitialWorld(52);
+    expect(soundscapeMood(world)).toBe('day');
+    world.livingWorld.dayTime = 0.94;
+    expect(soundscapeMood(world)).toBe('night');
+    world.livingWorld.weather = 'storm';
+    expect(soundscapeMood(world)).toBe('danger');
+    expect(soundscapeNotes('celebration', 8)).toEqual(soundscapeNotes('celebration', 8));
+    expect(new Set(soundscapeNotes('celebration', 8)).size).toBe(4);
   });
 });
 
